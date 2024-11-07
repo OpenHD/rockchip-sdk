@@ -1,0 +1,8 @@
+RK_UBOOT_CFG="rk3308-amp"
+RK_UBOOT_INI="RK3308MINIALL_UART4.ini"
+RK_UBOOT_TRUST_INI="RK3308TRUST_CPU3.ini"
+RK_AMP=y
+RK_AMP_CFG="rockchip_rk3308_rtos_linux_64bit_cfg"
+RK_AMP_FIT_ITS="rockchip_rk3308_rtos_linux.its"
+RK_KERNEL_DTS_NAME="rk3308b-evb-amic-v10-amp"
+RK_PARAMETER="parameters-rtos-linux-amp-64bit.txt"

@@ -1,0 +1,7 @@
+RK_BUILDROOT_BASE_CFG="rv1126_robot"
+RK_KERNEL_CFG="rv1126_robot_defconfig"
+RK_KERNEL_DTS_NAME="rv1126-evb-ddr3-v13-robot"
+RK_RECOVERY_BASE_CFG="rv1126_robot"
+RK_EXTRA_PARTITION_1_SRC="empty"
+RK_PARAMETER="parameter-buildroot-fit.txt"
+RK_USE_FIT_IMG=y

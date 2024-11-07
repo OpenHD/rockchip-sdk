@@ -1,0 +1,6 @@
+RK_ROOTFS_SQUASHFS=y
+RK_KERNEL_CFG="rk3036_dongle_linux_defconfig"
+RK_KERNEL_DTS_NAME="rk3036-dongle"
+RK_EXTRA_PARTITION_1_SRC="empty"
+RK_EXTRA_PARTITION_2_SRC="empty"
+RK_PARAMETER="parameter-buildroot-128M.txt"

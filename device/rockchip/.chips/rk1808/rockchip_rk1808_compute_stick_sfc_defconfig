@@ -1,0 +1,4 @@
+RK_BUILDROOT_BASE_CFG="rk1808_compute_stick"
+RK_ROOTFS_INITRD=y
+RK_KERNEL_DTS_NAME="rk1808-compute-v10"
+RK_PARAMETER="parameter-compute-stick.txt"

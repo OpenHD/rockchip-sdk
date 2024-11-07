@@ -1,0 +1,9 @@
+RK_ROOTFS=y
+RK_UBOOT_CFG_FRAGMENTS="rk-amp"
+RK_UBOOT_INI="RK3562MINIALL_AMP_CPU3.ini"
+RK_AMP=y
+RK_AMP_FIT_ITS="rockchip_rk3562_amp.its"
+RK_KERNEL_DTS_NAME="rk3562-evb2-ddr4-v10-linux-amp"
+RK_RECOVERY=y
+RK_PARAMETER="parameters-amp.txt"
+# RK_MISC is not set

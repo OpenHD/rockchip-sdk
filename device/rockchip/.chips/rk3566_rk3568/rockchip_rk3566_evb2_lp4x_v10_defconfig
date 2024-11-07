@@ -1,0 +1,3 @@
+RK_KERNEL_DTS_NAME="rk3566-evb2-lp4x-v10-linux"
+RK_PARAMETER="parameter-buildroot-fit.txt"
+RK_USE_FIT_IMG=y

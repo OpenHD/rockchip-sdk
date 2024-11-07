@@ -1,0 +1,5 @@
+RK_WIFIBT_CHIP="AP6275S"
+RK_UBOOT_SPL=y
+RK_KERNEL_DTS_NAME="rk3562-evb2-ddr4-v10-linux"
+RK_PARAMETER="parameter-buildroot-fit.txt"
+RK_USE_FIT_IMG=y

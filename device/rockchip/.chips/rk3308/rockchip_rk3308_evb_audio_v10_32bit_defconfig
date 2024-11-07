@@ -1,0 +1,11 @@
+RK_BUILDROOT_BASE_CFG="rk3308_bs_32_lvgl_release"
+RK_ROOTFS_SQUASHFS=y
+RK_WIFIBT_CHIP="AP6256"
+RK_UBOOT_CFG="rk3308-aarch32"
+RK_KERNEL_CFG="rk3308_linux_aarch32_defconfig"
+RK_KERNEL_ARM32=y
+RK_KERNEL_CFG_FRAGMENTS="rk3308bs_aarch32_mipi_display.config"
+RK_KERNEL_DTS_NAME="rk3308-evb-audio-v10-display-rgb-aarch32"
+RK_EXTRA_PARTITION_1_FSTYPE="ext2"
+RK_EXTRA_PARTITION_2_FSTYPE="ext2"
+RK_PARAMETER="parameter-32bit.txt"

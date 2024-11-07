@@ -1,0 +1,7 @@
+RK_BUILDROOT_BASE_CFG="rk3326_robot64"
+RK_ROOTFS_SQUASHFS=y
+RK_WIFIBT_CHIP="AP6212A1"
+RK_KERNEL_CFG="rk3326_linux_robot_defconfig"
+RK_KERNEL_DTS_NAME="rk3326-evb-lp3-v10-robot-linux"
+RK_RECOVERY_BASE_CFG="rk3326_robot"
+RK_PARAMETER="parameter-robot.txt"

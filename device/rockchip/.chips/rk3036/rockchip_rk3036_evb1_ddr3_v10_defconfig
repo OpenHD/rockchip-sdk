@@ -1,0 +1,2 @@
+RK_KERNEL_DTS_NAME="rk3036-evb1-ddr3-v10"
+RK_PARAMETER="parameter-buildroot.txt"

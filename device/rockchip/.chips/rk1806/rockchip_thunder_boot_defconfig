@@ -1,0 +1,5 @@
+RK_BUILDROOT_BASE_CFG="rk1806_thunder_boot"
+RK_UBOOT_SPL=y
+RK_KERNEL_CFG="rk1806_linux_thunder_boot_defconfig"
+RK_KERNEL_DTS_NAME="rk1806-thunder-boot"
+RK_PARAMETER="parameter-buildroot.txt"

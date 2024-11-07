@@ -1,0 +1,3 @@
+RK_KERNEL_DTS_NAME="rk3568-evb1-ddr4-v10-linux"
+RK_PARAMETER="parameter-buildroot-fit.txt"
+RK_USE_FIT_IMG=y

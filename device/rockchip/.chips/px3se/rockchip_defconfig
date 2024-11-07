@@ -1,0 +1,3 @@
+RK_WIFIBT_CHIP="RTL8723DS"
+RK_KERNEL_DTS_NAME="px3se-evb"
+RK_PARAMETER="parameter-buildroot.txt"

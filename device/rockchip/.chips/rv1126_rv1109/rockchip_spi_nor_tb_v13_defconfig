@@ -1,0 +1,14 @@
+RK_BUILDROOT_BASE_CFG="rv1126_evb_spi_nor_tb"
+RK_ROOTFS_INITRD=y
+RK_ROOTFS_ROMFS=y
+RK_WIFIBT_CHIP="AP6256"
+RK_UBOOT_CFG="rv1126-bat-spi-nor-tb"
+RK_UBOOT_SPL=y
+RK_UBOOT_RAW=y
+RK_KERNEL_CFG_FRAGMENTS="rv1126-tb.config"
+RK_KERNEL_DTS_NAME="rv1126-evb-ddr3-v12-tb-spi-nor"
+RK_KERNEL_IMG_NAME="Image"
+RK_BOOT_FIT_ITS_NAME="boot-tb.its"
+RK_RECOVERY_FIT_ITS_NAME="boot-tb.its"
+RK_PARAMETER="parameter-spi-nor-tb-32M.txt"
+RK_USE_FIT_IMG=y

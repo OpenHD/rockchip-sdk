@@ -1,0 +1,7 @@
+RK_BUILDROOT_BASE_CFG="rk3562_robot"
+RK_WIFIBT_CHIP="AP6275S"
+RK_UBOOT_SPL=y
+RK_KERNEL_CFG_FRAGMENTS="rk3562_robot.config"
+RK_KERNEL_DTS_NAME="rk3562-evb1-lp4x-v10-linux"
+RK_PARAMETER="parameter-buildroot-fit.txt"
+RK_USE_FIT_IMG=y

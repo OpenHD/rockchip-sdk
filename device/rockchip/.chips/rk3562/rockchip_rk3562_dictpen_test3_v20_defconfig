@@ -1,0 +1,8 @@
+RK_BUILDROOT_BASE_CFG="rk3562_dictpen"
+RK_WIFIBT_CHIP="AP6203BM"
+RK_UBOOT_INI="RK3562MINIALL_ULTRA.ini"
+RK_UBOOT_SPL=y
+RK_KERNEL_CFG="rk3562_linux_dictpen_defconfig"
+RK_KERNEL_DTS_NAME="rk3562-dictpen-test3-v20"
+RK_PARAMETER="parameter-buildroot-fit.txt"
+RK_USE_FIT_IMG=y

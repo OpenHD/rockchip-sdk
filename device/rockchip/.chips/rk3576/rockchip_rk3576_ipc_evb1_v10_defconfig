@@ -1,0 +1,5 @@
+RK_BUILDROOT_BASE_CFG="rk3576_ipc"
+# RK_WIFIBT is not set
+RK_UBOOT_SPL=y
+RK_KERNEL_DTS_NAME="rk3576-evb1-v10-linux"
+RK_USE_FIT_IMG=y

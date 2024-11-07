@@ -1,0 +1,10 @@
+RK_BUILDROOT_BASE_CFG="rv1126_trailcamera"
+RK_ROOTFS_INITRD=y
+RK_ROOTFS_ROMFS=y
+RK_UBOOT_CFG="rv1126-bat-spi-nor-tb"
+RK_KERNEL_CFG_FRAGMENTS="rv1126-tb.config rv1126-trailcamera.config"
+RK_KERNEL_DTS_NAME="rv1126-trailcamera"
+RK_KERNEL_IMG_NAME="Image"
+RK_RECOVERY_FIT_ITS_NAME="boot-tb.its"
+RK_PARAMETER="parameter-trailcamera.txt"
+RK_USE_FIT_IMG=y

@@ -1,0 +1,4 @@
+RK_BUILDROOT_BASE_CFG="rv1126_rv1109_uvcc"
+RK_KERNEL_DTS_NAME="rv1126-evb-ddr3-v13-uvc"
+RK_EXTRA_PARTITION_1_SRC="uvcc"
+RK_PARAMETER="parameter-buildroot-fit.txt"

@@ -1,0 +1,7 @@
+RK_YOCTO_MACHINE="rockchip-rk3576-evb"
+RK_YOCTO_EXTRA_CFG="rockchip-rk3576-vehicle-evb.conf"
+RK_UBOOT_CFG_FRAGMENTS="rk3576-car"
+RK_UBOOT_SPL=y
+RK_KERNEL_CFG_FRAGMENTS="rk3576_vehicle.config"
+RK_KERNEL_DTS_NAME="rk3576-vehicle-evb-v10-linux"
+RK_USE_FIT_IMG=y

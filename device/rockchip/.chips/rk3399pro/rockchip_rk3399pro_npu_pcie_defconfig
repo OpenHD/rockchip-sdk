@@ -1,0 +1,6 @@
+RK_BUILDROOT_BASE_CFG="rk3399pro-npu-multi-cam"
+RK_ROOTFS_INITRD=y
+RK_UBOOT_CFG="rknpu-lion"
+RK_KERNEL_CFG="rk3399pro_npu_pcie_defconfig"
+RK_KERNEL_DTS_NAME="rk3399pro-npu-evb-v10-multi-cam"
+RK_PARAMETER="parameter-npu.txt"

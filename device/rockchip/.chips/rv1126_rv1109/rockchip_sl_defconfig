@@ -1,0 +1,5 @@
+RK_BUILDROOT_BASE_CFG="rv1126_rv1109_sl"
+RK_KERNEL_DTS_NAME="rv1126-rmsl-ddr3-v1"
+RK_EXTRA_PARTITION_1_SRC="empty"
+RK_EXTRA_PARTITION_2_SRC="sl"
+RK_PARAMETER="parameter-buildroot-fit.txt"

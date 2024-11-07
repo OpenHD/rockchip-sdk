@@ -1,0 +1,2 @@
+RK_KERNEL_DTS_NAME="rk3128h-evb-linux"
+RK_PARAMETER="parameter-buildroot.txt"

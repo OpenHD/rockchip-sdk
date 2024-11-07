@@ -1,0 +1,2 @@
+RK_WIFIBT_CHIP="AP6212A1"
+RK_KERNEL_DTS_NAME="px30-evb-ddr3-v10-linux"

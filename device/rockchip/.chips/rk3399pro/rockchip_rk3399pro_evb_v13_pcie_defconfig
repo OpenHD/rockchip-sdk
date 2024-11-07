@@ -1,0 +1,2 @@
+RK_BUILDROOT_BASE_CFG="rk3399pro-multi-cam"
+RK_KERNEL_DTS_NAME="rk3399pro-evb-v13-linux"

@@ -1,0 +1,2 @@
+RK_YOCTO_MACHINE="rockchip-rk3288-evb-act8846"
+RK_KERNEL_DTS_NAME="rk3288-evb-act8846"
