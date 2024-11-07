@@ -1,0 +1,44 @@
+===========RK2118_RT-Thread SDK Release Note===========
+[RK2118_RT-Thead_SDK_Beta_V0.4.0_20240624.xml change log]
+1. mmc: support write emergency
+2. dfs: Add partition name support
+3. Add support for C++
+4. cmbacktrace: Add dump to flash support
+5. hifi4: ipc: fix memory leaks
+6. adsp_demo: add v20 board support
+7. evb_partybox_demo: fix bugs
+8. evb_soundbar_demo: support rkstudio tuning
+9. rkstudio: Fix eq effect is abnormal, Suppoer high order filter, Support resample in wavplayer
+10. rkstudio_comm: spi2apb optimize, add thirdpart protocol process
+
+[RK2118_RT-Thead_SDK_Beta_V0.3.0_20240612.xml change log]
+1. cmbacktrace: Add dump_stat support
+2. serial: support auto flow, support more baudrate 1500000,4000000,8000000
+3. spinand support
+4. rkplayer: update version to 0.0.4
+5. add evb_vocal_enhance_demo
+6. evb_partybox_demo: add rkstudio support, ao query channel status, ape/flac decoder
+7. rkstudio_parser: support for the third part standard protocol
+8. rkstudio: fix memory leakage problem, support bypass function, add rkaudio_common library 
+
+[RK2118_RT-Thead_SDK_Beta_V0.2.0_20240530.xml change log]
+1. adsp_demo: update to audio v2 driver
+2. evb_partybox_demo: update to audio v2 driver, support IEC61937 demux
+3. add dsp fw buildin support
+4. librkstudio: support wavplayer, hw param modify, fix some bug
+5. replay libc with libc_nano
+6. startup speed optimization
+7. add emmc boot support
+8. unified heap memory allocation
+9. add spi2apb upgrade test demo
+10. evb support ap6256 wifi
+11. fix usb stability issues
+12. ethernet ptp support
+
+[RK2118_RT-Thead_SDK_Beta_V0.1.0_20240415.xml change log]
+1. soundbar demo: mp3 dec, howling suppression + mixer, vocal seperation
+2. rkstudio: real-time sound adjustment support
+3. driver: FIR/IIR/ASRC/USB Host support, DSP clock adjust
+4. rock2: demux, ai, ao, af, codec (mp3) 
+5. SRAM/DDR memory layout configuration method update
+6. soundbar rkplayer: udisk, remote control, hdmi repeater, bt

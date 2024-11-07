@@ -1,0 +1,23 @@
+menu "RT-Thread board config"
+
+config RT_BOARD_NAME
+    string "the board name that you use"
+    default "rk3568_evb1"
+
+config RT_RUN_MEM_BASE
+    hex "the memory base address you use"
+    default 0x12000000
+    help
+        Set RK3568 MEM BASE.
+        At least 4K align.
+
+config RT_RUN_MEM_SIZE
+    hex "the memory size you use"
+    default 0x02000000
+    help
+        Set RK3568 MEM SIZE
+        At least 16M, default 32M.
+
+source "$BSP_DIR/board/$RT_BOARD_NAME/Kconfig"
+
+endmenu

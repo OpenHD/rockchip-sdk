@@ -1,0 +1,14 @@
+menu "System"
+
+config RT_USING_LVGL
+	bool "LVGL: Light and Versatile Graphics Library"
+	default n
+	help
+	  Enable LVGL.
+
+if RT_USING_LVGL
+	source "$RTT_DIR/components/system/lvgl/Kconfig"
+	source "$RTT_DIR/components/system/lvgl/Kconfig.rtt"
+endif
+
+endmenu

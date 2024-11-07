@@ -1,0 +1,57 @@
+source "$BSP_DIR/../common/drivers/Kconfig"
+
+menu "RT-Thread rockchip RK3568 drivers"
+
+config RT_USING_CACHE_ECC
+    bool "Enable Cache ECC"
+    default n
+
+menu "Enable CAN"
+    config RT_USING_CAN
+        bool "Enable CAN"
+        default n
+
+    if RT_USING_CAN
+    config RT_USING_CAN1
+        bool "Enable CAN1"
+        default n
+    endif
+endmenu
+
+config RT_USING_CRU
+    bool "Enable CRU"
+    default n
+
+menu "Enable GMAC"
+    config RT_USING_GMAC
+        bool "Enable GMAC"
+        select RT_USING_LWIP
+        default n
+
+    if RT_USING_GMAC
+    config RT_USING_GMAC0
+        bool "Enable GMAC0"
+        default n
+    config RT_USING_GMAC1
+        bool "Enable GMAC1"
+        default n
+    endif
+endmenu
+
+menu "Enable UART"
+    config RT_USING_UART
+        bool "Enable UART"
+        default y
+
+    if RT_USING_UART
+    config RT_USING_UART2
+        bool "Enable UART2"
+        default y
+
+    config RT_USING_UART4
+        bool "Enable UART4"
+        default n
+    endif
+endmenu
+
+endmenu
