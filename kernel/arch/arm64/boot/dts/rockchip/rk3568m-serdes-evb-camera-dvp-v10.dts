@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+ *
+ */
+
+/* dvp camera id define */
+#define DVP_CAMERA_NULL			0
+#define DVP_CAMERA_GC2145		1
+
+#define DVP_CAMERA_ID			DVP_CAMERA_GC2145
+
+#include "rk3568m-serdes-evb-lp4x-v10-camera.dtsi"
+
+#if (DVP_CAMERA_ID == DVP_CAMERA_NULL)
+	#include "rk3568m-serdes-evb-rkx12x-dvp-dummy.dtsi"
+#endif /* DVP_CAMERA_NULL */
+
+#if (DVP_CAMERA_ID == DVP_CAMERA_GC2145)
+	#include "rk3568m-serdes-evb-rkx12x-dvp-gc2145.dtsi"
+#endif /* DVP_CAMERA_GC2145 */
+
+#include "rk3568-android.dtsi"
+
+&i2c3 {
+	clock-frequency = <10000>;
+};
