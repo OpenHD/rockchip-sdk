@@ -1,0 +1,40 @@
+"Mixin" layer for adding current Rust toolchain into the Yocto Project LTS.
+
+At the time Kirkstone was released in May 2022 it included Rust 1.59.0,
+and officially Kirkstone supports only that. This thin special-purpose
+mixin layer is meant to provide a current Rust toolchain for Kirkstone
+by backporting the appropriate recipes from the master branch of
+openembedded-core.
+
+Notes:
+- cargo-update-recipe-crates.bbclass has been backported with a tweak to
+  use host rather than native Python since kirkstone does not have a new
+  enough Python (3.11 is required).  Using the update task in the class
+  will fail unless the host environment contains Python 3.11 or newer.
+- The newer version of librsvg from master has been backported since
+  there is not a straightforward way to update the existing one via
+  bbappend.  Backporting a working recipe should be easier to maintain
+  than developing an update of the older recipe in kirkstone.
+- python3-cryptography has been left alone since the recipe in kirkstone
+  still works with the newer toolchain, and updating it seems to have
+  more potential impact due to upstream API changes and its known to be
+  finicky build.  This may change if sufficient rationale for doing the
+  backport becomes apparent.
+- While changes to Rust recipe and class files related to oe-selftest
+  support are included by necessity, no effort has been made to backport
+  the actual addition of Rust to oe-selftest, as that is considered too
+  invasive and maintenance heavy.
+- To include Rust support in a SDK, do the following in e.g. local.conf:
+
+  TOOLCHAIN_HOST_TASK:append = " packagegroup-rust-cross-canadian-${MACHINE}"
+  TOOLCHAIN_TARGET_TASK:append = " ${@multilib_pkg_extend(d, 'libstd-rs')}"
+
+  Overriding populate_sdk_base.bbclass to avoid needing to do this seems
+  too invasive for this layer.
+- The intent is to track any further upgrades that occur in the master
+  branch of oe-core, with an expected end of support in April 2026, the
+  same as Yocto Project's planned EOL for Kirkstone (per
+  https://wiki.yoctoproject.org/wiki/Releases).
+
+Maintainers:
+Scott Murray <scott.murray@konsulko.com>

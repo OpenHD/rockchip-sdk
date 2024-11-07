@@ -1,0 +1,71 @@
+From 5ebf015736b397099a45e2bdd46b4c0d3ad87c44 Mon Sep 17 00:00:00 2001
+From: Jeffy Chen <jeffy.chen@rock-chips.com>
+Date: Mon, 17 Jun 2024 08:53:35 +0800
+Subject: [PATCH 99/99] compositor: Fix error in clone mode
+
+Avoid multiple globals to remain a single panel and background.
+
+Tested on RK3588 EVB with:
+Add to weston.ini:
+[output]
+name=HDMI-A-2
+
+[output]
+name=HDMI-A-1
+same-as=HDMI-A-2
+
+Signed-off-by: Jeffy Chen <jeffy.chen@rock-chips.com>
+---
+ libweston/compositor.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/libweston/compositor.c b/libweston/compositor.c
+index 5ae315b5..f73de192 100644
+--- a/libweston/compositor.c
++++ b/libweston/compositor.c
+@@ -6139,9 +6139,16 @@ bind_output(struct wl_client *client,
+ static void
+ weston_head_add_global(struct weston_head *head)
+ {
++	struct weston_head *tmp_head;
+ 	int version = 4;
+ 	const char *buf;
+ 
++	/* Avoid multiple globals to remain a single panel and background */
++	wl_list_for_each(tmp_head, &head->output->head_list, output_link) {
++		if (tmp_head->global)
++			return;
++	}
++
+ 	/**
+ 	 * HACK: Allow lowering wl_output version for old chromium
+ 	 * See:
+@@ -6227,6 +6234,7 @@ static void
+ weston_head_remove_global(struct weston_head *head)
+ {
+ 	struct wl_resource *resource, *tmp;
++	struct weston_head *tmp_head;
+ 
+ 	if (head->global)
+ 		weston_global_destroy_save(head->compositor, head->global);
+@@ -6245,6 +6253,17 @@ weston_head_remove_global(struct weston_head *head)
+ 		wl_resource_set_destructor(resource, NULL);
+ 	}
+ 	wl_list_init(&head->xdg_output_resource_list);
++
++	if (!head->output || !head->output->enabled)
++		return;
++
++	/* Avoid multiple globals to remain a single panel and background */
++	wl_list_for_each(tmp_head, &head->output->head_list, output_link) {
++		if (tmp_head != head && !tmp_head->global) {
++			weston_head_add_global(tmp_head);
++			break;
++		}
++	}
+ }
+ 
+ static void
+-- 
+2.20.1
+
