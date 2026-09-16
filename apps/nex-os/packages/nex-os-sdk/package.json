@@ -1,0 +1,55 @@
+{
+  "name": "@nex-os/sdk",
+  "version": "0.2.0",
+  "description": "SDK oficial para crear community apps en NEX OS",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "~5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "keywords": [
+    "nex-os",
+    "sdk",
+    "apps",
+    "desktop",
+    "community",
+    "react"
+  ],
+  "author": "shadownrx",
+  "homepage": "https://github.com/shadownrx/windows/tree/main/packages/nex-os-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/shadownrx/windows/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shadownrx/windows.git",
+    "directory": "packages/nex-os-sdk"
+  }
+}

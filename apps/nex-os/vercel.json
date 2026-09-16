@@ -1,0 +1,40 @@
+{
+  "rewrites": [
+    {
+      "source": "/nex-music",
+      "destination": "/nex-music.html"
+    },
+    {
+      "source": "/nex-music/",
+      "destination": "/nex-music.html"
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs.html"
+    },
+    {
+      "source": "/docs/",
+      "destination": "/docs.html"
+    },
+    {
+      "source": "/share",
+      "destination": "/api/og-nex-music"
+    },
+    {
+      "source": "/p/:p",
+      "destination": "/api/og-nex-music"
+    },
+    {
+      "source": "/api/og-image",
+      "destination": "/api/og-nex-music?img=1"
+    }
+  ],
+  "functions": {
+    "api/spotify-playlist.js": {
+      "maxDuration": 30
+    },
+    "api/playlist-share.js": {
+      "maxDuration": 30
+    }
+  }
+}

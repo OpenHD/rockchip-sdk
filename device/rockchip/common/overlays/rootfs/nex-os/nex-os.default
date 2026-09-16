@@ -1,0 +1,5 @@
+RK_NEX_OS=1
+
+# Uncomment and edit to override the default GPU/kiosk Chromium flags
+# set in S99nex-os for a specific board.
+# RK_NEX_OS_CHROMIUM_FLAGS="--use-gl=egl --ignore-gpu-blocklist"

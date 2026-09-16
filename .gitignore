@@ -1,0 +1,4 @@
+device/rockchip/common/overlays/rootfs/nex-os/www/
+.cache/nex-os/
+apps/nex-os/node_modules/
+apps/nex-os/dist/

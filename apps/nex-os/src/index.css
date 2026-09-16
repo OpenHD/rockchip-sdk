@@ -1,0 +1,864 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Use Outfit for headings and numbers to give a premium feel */
+  --font-display: 'Outfit', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --taskbar-height: 64px;
+  --win-radius: 14px;
+  --win-radius-sm: 8px;
+  --win-radius-lg: 20px;
+  --win-brightness: 1;
+  --win-accent: #60cdff;
+  --win-blue: #0078d4;
+  
+  /* Premium Shadows - Softer, wider, colored */
+  --shadow-sm: 0 4px 12px rgba(0,0,0,0.15);
+  --shadow-md: 0 8px 24px rgba(0,0,0,0.25);
+  --shadow-lg: 0 20px 50px -10px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+  --shadow-glow: 0 0 30px rgba(96, 205, 255, 0.4);
+
+  transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), color 0.4s ease;
+}
+
+/* --- NEON THEMES --- */
+:root[data-neon='cyberpunk'] {
+  --win-accent: #ff00ff;
+  --win-blue: #00ffff;
+  --neon-glow: 0 0 10px rgba(255, 0, 255, 0.8), 0 0 20px rgba(255, 0, 255, 0.4);
+  --win-radius: 0px;
+  --win-bg: #050505;
+}
+
+:root[data-neon='matrix'] {
+  --win-accent: #00ff41;
+  --win-blue: #003b00;
+  --neon-glow: 0 0 10px rgba(0, 255, 65, 0.8);
+  --win-radius: 4px;
+  --win-bg: #000c00;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+:root[data-neon='synthwave'] {
+  --win-accent: #f92aad;
+  --win-blue: #7214fc;
+  --neon-glow: 0 0 15px rgba(249, 42, 173, 0.6);
+  --win-radius: 12px;
+  --win-bg: #2d0b5a;
+}
+
+/* Neon Effects */
+.neon-border {
+  border: 1px solid var(--win-accent) !important;
+  box-shadow: var(--neon-glow);
+}
+
+.neon-text {
+  color: var(--win-accent) !important;
+  text-shadow: var(--neon-glow);
+}
+
+.scanlines {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanlines::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 2;
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  color: rgba(255, 255, 255, 0.95);
+  --acrylic-bg: rgba(28, 28, 28, 0.65);
+  --acrylic-blur: blur(50px) saturate(210%);
+  --mica-bg: rgba(32, 32, 32, 0.75);
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --active-bg: rgba(255, 255, 255, 0.12);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --card-bg: rgba(45, 45, 45, 0.5);
+  --win-bg: #1c1c1c;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  color: rgba(0, 0, 0, 0.9);
+  --acrylic-bg: rgba(255, 255, 255, 0.65);
+  --acrylic-blur: blur(50px) saturate(210%);
+  --mica-bg: rgba(243, 243, 243, 0.8);
+  --hover-bg: rgba(0, 0, 0, 0.06);
+  --active-bg: rgba(0, 0, 0, 0.1);
+  --border-color: rgba(0, 0, 0, 0.12);
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --win-bg: #f3f3f3;
+  --win-accent: #0067c0;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  background-color: #000;
+  cursor: default;
+}
+
+.acrylic {
+  background: var(--acrylic-bg);
+  backdrop-filter: var(--acrylic-blur);
+  -webkit-backdrop-filter: var(--acrylic-blur);
+  border: 1px solid var(--border-color);
+  border-top: 1px solid rgba(255,255,255,0.2); /* Edge light */
+  box-shadow: var(--shadow-md);
+  border-radius: var(--win-radius);
+}
+ 
+.mica {
+  background: var(--mica-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-top: 1px solid rgba(255,255,255,0.15); /* Premium edge lighting */
+  box-shadow: var(--shadow-lg);
+  border-radius: var(--win-radius);
+}
+
+.mica-alt {
+  background: rgba(20, 20, 20, 0.45);
+  backdrop-filter: blur(60px) saturate(180%);
+  -webkit-backdrop-filter: blur(60px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--win-radius-lg);
+}
+
+.premium-shadow {
+  box-shadow: var(--shadow-lg);
+}
+
+.border-glow {
+  position: relative;
+}
+
+.border-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.1) 100%) border-box;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Hardware Acceleration (GPU Render) */
+.gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+  will-change: transform, opacity;
+}
+
+/* Animations & Micro-interactions */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  background-color: var(--hover-bg);
+}
+
+.click-scale:active {
+  transform: scale(0.95);
+}
+
+.shine-effect {
+  position: relative;
+  overflow: hidden;
+}
+
+.shine-effect::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  transform: skewX(-25deg);
+  transition: 0.5s;
+}
+
+.shine-effect:hover::before {
+  left: 150%;
+}
+
+button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:active {
+  transform: scale(0.96);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Utility Classes */
+.w-full {
+  width: 100%;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.w-screen {
+  width: 100vw;
+}
+
+.h-screen {
+  height: 100vh;
+}
+
+.relative {
+  position: relative;
+}
+
+.absolute {
+  position: absolute;
+}
+
+.fixed {
+  position: fixed;
+}
+
+.inset-0 {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.overflow-hidden {
+  overflow: hidden;
+}
+
+.bg-cover {
+  background-size: cover;
+}
+
+.bg-center {
+  background-position: center;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.win-accent-bg {
+  background-color: var(--win-accent);
+}
+
+.win-accent-text {
+  color: var(--win-accent);
+}
+
+.win-accent-border {
+  border-color: var(--win-accent);
+}
+
+.brightness-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: black;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: calc(1 - var(--win-brightness));
+  transition: opacity 0.2s ease;
+}
+
+.glass-morphism {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.hidden {
+  display: none;
+}
+
+/* Maximized windows fill the available desktop area above the taskbar */
+.window.maximized {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: calc(100vh - var(--taskbar-height)) !important;
+  max-width: 100vw !important;
+  max-height: calc(100vh - var(--taskbar-height)) !important;
+  border-radius: 0 !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+.window.maximized .window-content {
+  max-height: none !important;
+  flex: 1;
+}
+
+/* ============================================
+   RESPONSIVE DESIGN MEDIA QUERIES
+   ============================================ */
+
+/* Mobile Optimizations (< 640px) */
+@media (max-width: 639px) {
+  :root {
+    --taskbar-height: 56px;
+    font-size: 14px;
+  }
+
+  body {
+    font-size: 14px;
+  }
+
+  /* Taskbar responsive */
+  .taskbar-container {
+    padding: 0 4px !important;
+    height: 56px;
+  }
+
+  .taskbar-center {
+    gap: 4px !important;
+  }
+
+  .taskbar-search-pill {
+    display: none !important;
+  }
+
+  .taskbar-apps {
+    gap: 2px !important;
+  }
+
+  .taskbar-app-icon {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 14px !important;
+  }
+
+  /* Window responsive */
+  .window:not(.maximized) {
+    width: 90vw !important;
+    height: auto !important;
+    max-height: calc(100vh - 120px) !important;
+    max-width: 100% !important;
+  }
+
+  .window:not(.maximized) .window-content {
+    max-height: calc(100vh - 200px) !important;
+    overflow-y: auto !important;
+  }
+
+  .window-header {
+    padding: 8px !important;
+    gap: 4px !important;
+  }
+
+  .window-title {
+    font-size: 12px !important;
+    max-width: 70vw !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .window-controls button {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 12px !important;
+  }
+
+  /* Desktop icons */
+  .desktop-icon {
+    width: 60px !important;
+    height: 70px !important;
+    font-size: 11px !important;
+  }
+
+  .desktop-icon-image {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .desktop-icon-label {
+    font-size: 10px !important;
+    max-height: 30px !important;
+  }
+
+  /* Start menu responsive */
+  .start-menu {
+    width: 95vw !important;
+    height: 80vh !important;
+    max-width: 100% !important;
+    bottom: 70px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    border-radius: 8px !important;
+  }
+
+  .start-menu-inner {
+    padding: 12px !important;
+  }
+
+  .search-box {
+    padding: 8px !important;
+    font-size: 13px !important;
+  }
+
+  .apps-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .recommended-grid {
+    gap: 6px !important;
+  }
+
+  .app-btn {
+    padding: 8px !important;
+    font-size: 11px !important;
+  }
+
+  .app-icon-wrapper {
+    font-size: 24px !important;
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  /* Notifications responsive */
+  .notification-toast {
+    width: 85vw !important;
+    max-width: 300px !important;
+    font-size: 12px !important;
+  }
+
+  /* Context menu responsive */
+  .context-menu {
+    max-width: 90vw !important;
+    font-size: 13px !important;
+  }
+
+  .context-menu-item {
+    padding: 6px 8px !important;
+    gap: 4px !important;
+  }
+
+  /* Widgets panel responsive */
+  .widgets-panel {
+    width: 95vw !important;
+    height: 80vh !important;
+    right: 0 !important;
+    top: 0 !important;
+  }
+
+  /* Task view responsive */
+  .task-view {
+    padding: 12px !important;
+  }
+
+  .task-view-container {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  /* Buttons and controls — skip NEX phone shell so apps keep their own type scale */
+  html:not(.nex-phone) button {
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  html:not(.nex-phone) h1,
+  html:not(.nex-phone) h2,
+  html:not(.nex-phone) h3 {
+    font-size: 1.25rem !important;
+  }
+
+  html:not(.nex-phone) h4,
+  html:not(.nex-phone) h5,
+  html:not(.nex-phone) h6 {
+    font-size: 1rem !important;
+  }
+
+  html:not(.nex-phone) p {
+    font-size: 0.875rem !important;
+  }
+
+  html:not(.nex-phone) input,
+  html:not(.nex-phone) button,
+  html:not(.nex-phone) textarea,
+  html:not(.nex-phone) select {
+    font-size: 16px !important;
+  }
+
+  /* Touch-friendly spacing */
+  .touch::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .touch button,
+  .touch a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Tablet Optimizations (640px - 1024px) */
+@media (min-width: 640px) and (max-width: 1023px) {
+  :root {
+    --taskbar-height: 48px;
+    font-size: 15px;
+  }
+
+  .taskbar-search-pill {
+    width: 220px !important;
+  }
+
+  .taskbar-apps {
+    max-width: 600px !important;
+    gap: 4px !important;
+  }
+
+  /* Window tablet sizing */
+  .window:not(.maximized) {
+    max-width: 90vw !important;
+    max-height: 85vh !important;
+  }
+
+  .window:not(.maximized) .window-content {
+    max-height: calc(85vh - 50px) !important;
+  }
+
+  /* Start menu tablet sizing */
+  .start-menu {
+    width: 90vw !important;
+    height: 75vh !important;
+    max-height: calc(100vh - 60px) !important;
+  }
+
+  .apps-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  /* Desktop icons */
+  .desktop-icon {
+    width: 70px !important;
+    height: 80px !important;
+    font-size: 12px !important;
+  }
+
+  .desktop-icon-image {
+    width: 48px !important;
+    height: 48px !important;
+  }
+
+  /* Widgets panel */
+  .widgets-panel {
+    width: 85vw !important;
+    height: 80vh !important;
+    right: 20px !important;
+  }
+
+  /* Context menu */
+  .context-menu {
+    max-width: 85vw !important;
+  }
+}
+
+/* Small Laptops (1024px - 1440px) */
+@media (min-width: 1024px) and (max-width: 1439px) {
+  :root {
+    --taskbar-height: 48px;
+    font-size: 14px;
+  }
+
+  .taskbar-search-pill {
+    width: 250px !important;
+  }
+
+  .taskbar-apps {
+    max-width: calc(100vw - 400px) !important;
+  }
+
+  /* Window sizing */
+  .window:not(.maximized) {
+    max-width: 85vw !important;
+    max-height: 90vh !important;
+  }
+
+  /* Start menu sizing */
+  .start-menu {
+    width: 600px !important;
+    height: 85vh !important;
+    left: 20px !important;
+  }
+
+  .apps-grid {
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 12px !important;
+  }
+
+  /* Desktop icons */
+  .desktop-icon {
+    width: 80px !important;
+    height: 90px !important;
+    font-size: 13px !important;
+  }
+}
+
+/* Large Laptops/Desktops (1440px+) */
+@media (min-width: 1440px) {
+  :root {
+    --taskbar-height: 48px;
+    font-size: 15px;
+  }
+
+  .taskbar-search-pill {
+    width: 280px !important;
+  }
+
+  /* Start menu default sizing */
+  .start-menu {
+    width: 650px !important;
+    height: 90vh !important;
+  }
+
+  .apps-grid {
+    grid-template-columns: repeat(6, 1fr) !important;
+    gap: 14px !important;
+  }
+
+  /* Desktop icons */
+  .desktop-icon {
+    width: 90px !important;
+    height: 100px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* Ultra-Wide Displays (1920px+) */
+@media (min-width: 1920px) {
+  .taskbar-search-pill {
+    width: 320px !important;
+  }
+
+  .start-menu {
+    width: 700px !important;
+  }
+
+  .apps-grid {
+    grid-template-columns: repeat(7, 1fr) !important;
+  }
+
+  .desktop-icon {
+    width: 100px !important;
+    height: 110px !important;
+    font-size: 15px !important;
+  }
+}
+
+/* Short Height Screens */
+@media (max-height: 600px) {
+  :root {
+    --taskbar-height: 40px;
+  }
+
+  .taskbar-container {
+    height: 40px !important;
+  }
+
+  .taskbar-app-icon {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .start-menu {
+    max-height: calc(100vh - 50px) !important;
+    height: 95vh !important;
+  }
+
+  .window:not(.maximized) {
+    max-height: calc(100vh - 50px) !important;
+  }
+
+  .window:not(.maximized) .window-content {
+    max-height: calc(100vh - 100px) !important;
+  }
+
+  .desktop-icon {
+    width: 50px !important;
+    height: 60px !important;
+    font-size: 10px !important;
+  }
+}
+
+/* Landscape Mode (Mobile/Tablet) */
+@media (max-width: 1023px) and (orientation: landscape) {
+  :root {
+    --taskbar-height: 40px;
+  }
+
+  .taskbar-container {
+    height: 40px !important;
+  }
+
+  .taskbar-app-icon {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 12px !important;
+  }
+
+  .window:not(.maximized) {
+    max-height: calc(100vh - 50px) !important;
+    height: auto !important;
+  }
+
+  .window:not(.maximized) .window-content {
+    max-height: calc(100vh - 100px) !important;
+    overflow-y: auto !important;
+  }
+
+  .desktop-icon {
+    width: 60px !important;
+    height: 65px !important;
+    font-size: 11px !important;
+    margin: 4px 2px !important;
+  }
+
+  .start-menu {
+    height: 95vh !important;
+    bottom: 45px !important;
+  }
+}
+
+/* Portrait Mode (Mobile/Tablet) */
+@media (max-width: 1023px) and (orientation: portrait) {
+  .taskbar-container {
+    flex-wrap: wrap;
+    justify-content: space-around;
+  }
+
+  .start-menu {
+    height: 85vh !important;
+  }
+}
+
+/* High DPI/Retina Displays */
+@media (-webkit-min-device-pixel-ratio: 2) {
+  .window,
+  .start-menu,
+  .widgets-panel {
+    border-width: 0.5px;
+  }
+
+  .resizer {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+/* Accessibility: Reduce Motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Accessibility: High Contrast */
+@media (prefers-contrast: more) {
+  .mica {
+    background: var(--mica-bg) !important;
+    border: 2px solid var(--border-color) !important;
+  }
+
+  button {
+    border: 1px solid var(--border-color) !important;
+  }
+}

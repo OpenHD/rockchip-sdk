@@ -1,0 +1,47 @@
+#!/bin/sh
+
+[ -r /etc/default/nex-os ] && . /etc/default/nex-os
+
+# GPU-accelerated rendering (EGL/Mali) and hw video decode (RKMPP), plus
+# background work trimmed since this is a single always-foreground kiosk
+# tab. Override RK_NEX_OS_CHROMIUM_FLAGS in /etc/default/nex-os per board
+# if a chip's GPU driver needs something different.
+: "${RK_NEX_OS_CHROMIUM_FLAGS:=--use-gl=egl \
+--ignore-gpu-blocklist \
+--enable-gpu-rasterization \
+--enable-oop-rasterization \
+--enable-zero-copy \
+--enable-accelerated-video-decode \
+--disk-cache-size=104857600 \
+--disable-features=TranslateUI,MediaRouter \
+--disable-background-networking \
+--disable-background-timer-throttling \
+--disable-backgrounding-occluded-windows \
+--disable-renderer-backgrounding \
+--disable-component-update \
+--disable-sync \
+--disable-translate \
+--disable-pinch \
+--overscroll-history-navigation=0 \
+--noerrdialogs \
+--disable-infobars}"
+
+case "$1" in
+	start)
+		[ "${RK_NEX_OS:-1}" = 0 ] && exit 0
+		mkdir -p /run/nex-os
+		busybox httpd -f -p 127.0.0.1:8080 -h /opt/nex-os/www \
+			>/run/nex-os/httpd.log 2>&1 &
+		(
+			while [ ! -S /run/user/0/wayland-0 ]; do sleep 0.2; done
+			exec chromium \
+				--ozone-platform=wayland \
+				--no-first-run \
+				--disable-session-crashed-bubble \
+				$RK_NEX_OS_CHROMIUM_FLAGS \
+				--kiosk http://127.0.0.1:8080/
+		) >/run/nex-os/chromium.log 2>&1 &
+		;;
+esac
+
+exit 0
