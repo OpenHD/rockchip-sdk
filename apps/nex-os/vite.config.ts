@@ -55,6 +55,7 @@ export default defineConfig({
         main: './index.html',
         spotify: './nex-music.html',
         docs: './docs.html',
+        admin: './admin.html',
       },
       output: {
         manualChunks(id) {
@@ -77,6 +78,8 @@ export default defineConfig({
           const url = req.url || ''
           if (url === '/nex-music' || url === '/nex-music/') {
             req.url = '/nex-music.html'
+          } else if (url === '/admin' || url === '/admin/') {
+            req.url = '/admin.html'
           } else if (url === '/docs' || url === '/docs/' || /^\/docs\?/.test(url)) {
             req.url = '/docs.html' + (url.includes('?') ? url.slice(url.indexOf('?')) : '')
           }
@@ -123,6 +126,7 @@ export default defineConfig({
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [
           /^\/docs(?:\/|$|\?)/,
+          /^\/admin(?:\/|$|\?)/,
           /^\/nex-music(?:\/|$|\?)/,
           /^\/api\//,
           /^\/share(?:\/|$|\?)/,

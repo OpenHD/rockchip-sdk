@@ -2,6 +2,9 @@
 
 [ -r /etc/default/nex-os ] && . /etc/default/nex-os
 
+# En imágenes endurecidas el kiosk no se puede desactivar.
+[ -e /etc/nex-os-hardened ] && RK_NEX_OS=1
+
 case "$1" in
 	start)
 		[ "${RK_NEX_OS:-1}" = 0 ] && exit 0
@@ -10,11 +13,15 @@ case "$1" in
 			>/run/nex-os/httpd.log 2>&1 &
 		(
 			while [ ! -S /run/user/0/wayland-0 ]; do sleep 1; done
-			exec chromium \
-				--ozone-platform=wayland \
-				--no-first-run \
-				--disable-session-crashed-bubble \
-				--kiosk http://127.0.0.1:8080/
+			# nex-agent cierra Chromium para aplicar un bloqueo; se relanza solo.
+			while :; do
+				chromium \
+					--ozone-platform=wayland \
+					--no-first-run \
+					--disable-session-crashed-bubble \
+					--kiosk http://127.0.0.1:8080/
+				sleep 1
+			done
 		) >/run/nex-os/chromium.log 2>&1 &
 		;;
 esac

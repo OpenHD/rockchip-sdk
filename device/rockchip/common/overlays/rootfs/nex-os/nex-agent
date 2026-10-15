@@ -1,0 +1,520 @@
+#!/bin/sh
+# nex-agent: gestión remota del TV box (ver apps/nex-os/docs/GESTION_REMOTA.md).
+#
+# - Se autentica ante Supabase con un token de 256 bits que nunca sale de
+#   /var/lib/nex-agent (0700). El token viaja solo en el cuerpo HTTPS, nunca
+#   en argumentos de procesos.
+# - Es la fuente de verdad del equipo: calcula el modo (vinculación, bloqueado,
+#   activo), aplica las políticas de Chromium y el filtro DNS, y publica un
+#   estado de solo lectura para la UI en /run/nex-agent/public.
+# - Falla cerrado: sin configuración válida, la lista blanca queda vacía.
+# - Informa: en cada sync manda su estado real (modo aplicado, filtro, firewall,
+#   endurecimiento) y una cola de eventos (bloqueo aplicado, manipulación...)
+#   que se conserva en disco mientras no haya internet.
+
+set -u
+umask 077
+
+CONF=/etc/nex-agent.conf
+[ -r "$CONF" ] && . "$CONF"
+
+MDM_URL=${NEX_MDM_URL:-}
+MDM_KEY=${NEX_MDM_ANON_KEY:-}
+SYNC_INTERVAL=${NEX_AGENT_SYNC_INTERVAL:-60}
+REPORT_INTERVAL=${NEX_AGENT_REPORT_INTERVAL:-300}
+BASE_DOMAINS=${NEX_AGENT_BASE_DOMAINS:-}
+FALLBACK_DNS=${NEX_AGENT_FALLBACK_DNS:-"1.1.1.1 9.9.9.9"}
+NTP_DOMAINS=${NEX_AGENT_NTP_DOMAINS:-"pool.ntp.org"}
+UI_ORIGIN=${NEX_AGENT_UI_ORIGIN:-"http://127.0.0.1:8080"}
+
+STATE_DIR=/var/lib/nex-agent
+RUN_DIR=/run/nex-agent
+PUBLIC_DIR=$RUN_DIR/public
+TOKEN_FILE=$STATE_DIR/token
+CONFIG_FILE=$STATE_DIR/config.json
+PAIRING_FILE=$STATE_DIR/pairing.json
+LAST_SYNC_FILE=$STATE_DIR/last_sync
+SERVER_EPOCH_FILE=$STATE_DIR/server_epoch
+EVENTS_FILE=$STATE_DIR/events.jsonl
+APPLIED_FILE=$STATE_DIR/applied_mode
+AGENT_VERSION=2
+LOGO_DIR=$STATE_DIR/branding
+POLICY_FILE=/etc/chromium/policies/managed/nex-mdm-urls.json
+DNS_CONF=$RUN_DIR/dnsmasq.conf
+DNS_UPSTREAM=$RUN_DIR/resolv.upstream
+DNS_LOG=$RUN_DIR/dns.log
+DNS_PID=$RUN_DIR/dnsmasq.pid
+FIRMWARE=$(cat /etc/nex-os-version 2>/dev/null || echo unknown)
+
+log() { logger -t nex-agent -- "$*" 2>/dev/null || echo "nex-agent: $*" >&2; }
+
+now() { date +%s; }
+
+mdm_host() { printf '%s\n' "$MDM_URL" | sed -n 's#^https://\([A-Za-z0-9.-]*\).*#\1#p'; }
+
+# Escritura atómica: evita que la UI o Chromium lean un archivo a medias.
+write_atomic() {
+	tmp="$1.tmp.$$"
+	cat > "$tmp" && chmod "${2:-0644}" "$tmp" && mv -f "$tmp" "$1"
+}
+
+# Encola un evento: add_event <kind> [details-json]. Se conservan los últimos 100.
+add_event() {
+	d=${2:-}
+	[ -n "$d" ] || d='{}'
+	jq -nc --arg k "$1" --argjson d "$d" --argjson at "$(now)" '{kind: $k, at: $at, details: $d}' \
+		>> "$EVENTS_FILE" 2>/dev/null || return 0
+	if [ "$(wc -l < "$EVENTS_FILE")" -gt 100 ]; then
+		tail -n 100 "$EVENTS_FILE" > "$EVENTS_FILE.tmp" && mv -f "$EVENTS_FILE.tmp" "$EVENTS_FILE"
+	fi
+	log "evento: $1"
+}
+
+# Una vez por arranque (marca en /run, que es tmpfs).
+add_event_once() {
+	[ -e "$RUN_DIR/once.$1" ] && return 0
+	touch "$RUN_DIR/once.$1"
+	add_event "$@"
+}
+
+# Identificador estable de hardware: sobrevive a reflasheos y resets.
+# Serie del SoC (eFuse) + CID del eMMC, hasheados.
+hardware_id() {
+	cpu=$(sed -n 's/^Serial[[:space:]]*:[[:space:]]*\([0-9a-fA-F]\{8,\}\)$/\1/p' /proc/cpuinfo 2>/dev/null | head -n 1)
+	cid=$(cat /sys/block/mmcblk*/device/cid 2>/dev/null | head -n 1)
+	[ -n "$cpu$cid" ] || return 0
+	printf 'nex-hw:%s:%s' "$cpu" "$cid" | sha256sum | cut -c1-64
+}
+
+status_json() {
+	hardened=false; [ -e /etc/nex-os-hardened ] && hardened=true
+	dns=false; dns_running && dns=true
+	fw=false; iptables -C OUTPUT -j NEX_DNS 2>/dev/null && fw=true
+	up=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
+	free=$(df -m /userdata 2>/dev/null | awk 'NR==2 {print $4}')
+	jq -nc --arg mode "${MODE:-starting}" --arg kind "${LOCK_KIND:-}" --argjson hardened $hardened \
+		--argjson dns $dns --argjson fw $fw --argjson up "${up:-0}" --argjson free "${free:-0}" \
+		--argjson v "$AGENT_VERSION" \
+		'{mode: $mode, lock_kind: (if $kind == "" then null else $kind end), hardened: $hardened,
+		  dns_filter: $dns, firewall: $fw, uptime: $up, free_mb: $free, agent: $v}'
+}
+
+ensure_token() {
+	[ -s "$TOKEN_FILE" ] && grep -qx '[0-9a-f]\{64\}' "$TOKEN_FILE" && return 0
+	log "generando token de equipo"
+	head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | write_atomic "$TOKEN_FILE" 0600
+	rm -f "$CONFIG_FILE" "$PAIRING_FILE"
+}
+
+# rpc <función> <json>: el token se inyecta en el cuerpo desde el archivo.
+rpc() {
+	jq -cRn --argjson extra "$2" '{p_token: input} + $extra' < "$TOKEN_FILE" |
+	curl -fsS --proto =https --tlsv1.2 --max-time 20 --max-filesize 2097152 \
+		-H "apikey: $MDM_KEY" -H "Authorization: Bearer $MDM_KEY" \
+		-H "Content-Type: application/json" --data-binary @- \
+		"$MDM_URL/rest/v1/rpc/$1"
+}
+
+sync_remote() {
+	[ -n "$MDM_URL" ] && [ -n "$MDM_KEY" ] || { log "sin NEX_MDM_URL/NEX_MDM_ANON_KEY"; return 1; }
+	ensure_token
+
+	hw=$(hardware_id)
+	[ -s "$EVENTS_FILE" ] || : > "$EVENTS_FILE"
+	sent=$(wc -l < "$EVENTS_FILE")
+	body=$(jq -nc --arg fw "$FIRMWARE" --arg hw "$hw" --argjson st "$(status_json)" \
+		--slurpfile ev "$EVENTS_FILE" \
+		'{p_firmware: $fw, p_status: $st, p_events: $ev, p_hardware_id: (if $hw == "" then null else $hw end)}')
+	resp=$(rpc mdm_device_sync "$body") || { log "sync falló (sin conexión?)"; return 1; }
+	status=$(printf '%s' "$resp" | jq -r '.status // empty' 2>/dev/null)
+
+	# Entregados: se quitan de la cola los que se mandaron (pueden haber llegado nuevos).
+	if [ -n "$status" ] && [ "$status" != unknown ]; then
+		tail -n +"$((sent + 1))" "$EVENTS_FILE" > "$EVENTS_FILE.tmp" && mv -f "$EVENTS_FILE.tmp" "$EVENTS_FILE"
+	fi
+
+	case "$status" in
+	unknown)
+		# Token desconocido: alta nueva, o re-enrolamiento si el hardware ya era de una empresa.
+		resp=$(rpc mdm_device_register "$(jq -nc --arg fw "$FIRMWARE" --arg hw "$hw" \
+			'{p_firmware: $fw, p_hardware_id: (if $hw == "" then null else $hw end)}')") || return 1
+		status=$(printf '%s' "$resp" | jq -r '.status // empty' 2>/dev/null)
+		case "$status" in
+		unpaired) ;;
+		paired)
+			# Re-enrolado: se pide la configuración completa con el token nuevo.
+			resp=$(rpc mdm_device_sync "$(jq -nc --arg fw "$FIRMWARE" '{p_firmware: $fw}')") || return 1
+			status=$(printf '%s' "$resp" | jq -r '.status // empty' 2>/dev/null)
+			;;
+		*) return 1 ;;
+		esac
+		;;
+	esac
+
+	case "$status" in
+	unpaired)
+		printf '%s' "$resp" | jq -c '{pairing_code, pairing_expires_at}' | write_atomic "$PAIRING_FILE"
+		rm -f "$CONFIG_FILE"
+		;;
+	paired)
+		printf '%s' "$resp" | jq -e '.company.id and (.apps | type == "array")' >/dev/null || {
+			log "respuesta de sync inválida"; return 1; }
+		printf '%s' "$resp" | jq -c . | write_atomic "$CONFIG_FILE" 0600
+		rm -f "$PAIRING_FILE"
+		;;
+	*)
+		log "estado de sync desconocido: $status"
+		return 1
+		;;
+	esac
+
+	now | write_atomic "$LAST_SYNC_FILE" 0600
+	ep=$(printf '%s' "$resp" | jq -r '.server_epoch // empty' 2>/dev/null)
+	case "$ep" in '' | *[!0-9]*) ;; *) echo "$ep" | write_atomic "$SERVER_EPOCH_FILE" 0600 ;; esac
+	return 0
+}
+
+# Modo efectivo: starting | unpaired | locked | active
+# Prioridad: bloqueo manual > pago vencido > reloj inválido > días sin conexión.
+compute_mode() {
+	REASON=""
+	LOCK_KIND=""
+	PAY_WARN=0
+	if [ -s "$CONFIG_FILE" ]; then
+		last=$(cat "$LAST_SYNC_FILE" 2>/dev/null || echo 0)
+		days=$(jq -r '.company.offline_lock_days // 7' "$CONFIG_FILE")
+		# La hora nunca se toma menor a la última hora del servidor: atrasar el
+		# reloj no evita el vencimiento del pago.
+		t=$(now)
+		srv=$(cat "$SERVER_EPOCH_FILE" 2>/dev/null || echo 0)
+		[ "$srv" -gt "$t" ] 2>/dev/null && t=$srv
+		# Si hay control de pago pero la fecha no es un número válido, se bloquea (falla cerrado).
+		lock_at=$(jq -r 'if .payment == null then 0 else (.payment.lock_at | if type == "number" then floor else 1 end) end' "$CONFIG_FILE")
+		warn_at=$(jq -r '.payment.warn_at // 0 | if type == "number" then floor else 0 end' "$CONFIG_FILE")
+		if [ "$(jq -r '.locked' "$CONFIG_FILE")" = true ]; then
+			MODE=locked
+			LOCK_KIND=manual
+			REASON=$(jq -r '.lock_reason // ""' "$CONFIG_FILE")
+		elif [ "$lock_at" -gt 0 ] && [ "$t" -ge "$lock_at" ]; then
+			MODE=locked
+			LOCK_KIND=payment
+			REASON=$(jq -r '.payment.message // ""' "$CONFIG_FILE")
+		elif [ "$(now)" -lt $((last - 300)) ]; then
+			MODE=locked
+			LOCK_KIND=clock
+			REASON="La hora del equipo es inválida. Conectalo a internet."
+		elif [ "$t" -lt $((last - 300)) ]; then
+			# El reloj volvió hacia atrás: posible intento de esquivar el límite offline.
+			MODE=locked
+			REASON="La hora del equipo es inválida. Conectalo a internet."
+		elif [ $((t - last)) -gt $((days * 86400)) ]; then
+			MODE=locked
+			LOCK_KIND=offline
+			REASON="El equipo estuvo más de $days días sin conexión. Conectalo a internet."
+		else
+			MODE=active
+			[ "$warn_at" -gt 0 ] && [ "$t" -ge "$warn_at" ] && PAY_WARN=1
+		fi
+	elif [ -s "$PAIRING_FILE" ]; then
+		MODE=unpaired
+	else
+		MODE=starting
+	fi
+}
+
+update_logo() {
+	[ -s "$CONFIG_FILE" ] || return 0
+	path=$(jq -r '.company.logo_path // empty' "$CONFIG_FILE")
+	mkdir -p "$LOGO_DIR"
+	if [ -z "$path" ]; then
+		[ -f "$LOGO_DIR/source" ] && log "logo eliminado"
+		rm -f "$LOGO_DIR"/logo.* "$LOGO_DIR/source"
+		return 0
+	fi
+	printf '%s\n' "$path" | grep -qx '[0-9a-f-]\{36\}/[A-Za-z0-9._-]\{1,80\}' || return 0
+	[ "$(cat "$LOGO_DIR/source" 2>/dev/null)" = "$path" ] && return 0
+
+	tmp=$LOGO_DIR/download.$$
+	curl -fsS --proto =https --tlsv1.2 --max-time 30 --max-filesize 1048576 \
+		-o "$tmp" "$MDM_URL/storage/v1/object/public/mdm-branding/$path" || { rm -f "$tmp"; return 0; }
+
+	# Se valida por firma del archivo, no por extensión ni Content-Type.
+	magic=$(head -c 12 "$tmp" | od -An -tx1 | tr -d ' \n')
+	case "$magic" in
+	89504e470d0a1a0a*) ext=png ;;
+	ffd8ff*) ext=jpg ;;
+	52494646????????57454250) ext=webp ;;
+	*) log "logo rechazado: formato no permitido"; rm -f "$tmp"; return 0 ;;
+	esac
+	rm -f "$LOGO_DIR"/logo.*
+	chmod 0644 "$tmp" && mv -f "$tmp" "$LOGO_DIR/logo.$ext"
+	printf '%s\n' "$path" | write_atomic "$LOGO_DIR/source" 0600
+	log "logo actualizado"
+}
+
+publish_ui_state() {
+	mkdir -p "$PUBLIC_DIR"
+	chmod 0755 "$RUN_DIR" "$PUBLIC_DIR"
+	logo=""
+	for f in "$LOGO_DIR"/logo.*; do
+		[ -f "$f" ] || continue
+		logo=$(basename "$f")
+		cmp -s "$f" "$PUBLIC_DIR/$logo" && continue
+		cp -f "$f" "$PUBLIC_DIR/$logo.tmp" && chmod 0644 "$PUBLIC_DIR/$logo.tmp" &&
+			mv -f "$PUBLIC_DIR/$logo.tmp" "$PUBLIC_DIR/$logo"
+	done
+	for f in "$PUBLIC_DIR"/logo.*; do
+		[ -f "$f" ] && [ "$(basename "$f")" != "$logo" ] && rm -f "$f"
+	done
+
+	# Nunca se publica el token ni la configuración cruda: solo lo que la UI necesita.
+	cfg=$CONFIG_FILE; [ -s "$cfg" ] || cfg=/dev/null
+	pair=$PAIRING_FILE; [ -s "$pair" ] || pair=/dev/null
+	jq -n --arg mode "$MODE" --arg reason "$REASON" --arg logo "$logo" \
+		--arg kind "$LOCK_KIND" --argjson warn "$PAY_WARN" \
+		--slurpfile cfg "$cfg" --slurpfile pair "$pair" --argjson t "$(now)" '
+		($cfg[0] // {}) as $c | ($pair[0] // {}) as $p |
+		{
+			mode: $mode,
+			updated_at: $t,
+			logo: (if $logo == "" then null else ("/agent/" + $logo) end),
+			company_name: $c.company.name,
+			device_name: $c.device.name,
+			lock_message: (if $mode == "locked" then $c.company.lock_message else null end),
+			lock_kind: (if $kind == "" then null else $kind end),
+			lock_reason: (if $reason == "" then null else $reason end),
+			payment_due: (if $warn == 1 then $c.payment.paid_until else null end),
+			pairing_code: (if $mode == "unpaired" then $p.pairing_code else null end),
+			pairing_expires_at: (if $mode == "unpaired" then $p.pairing_expires_at else null end),
+			apps: (if $mode == "active" then [($c.apps // [])[] | {id, name, kind, launch_url}] else [] end)
+		}' | write_atomic "$PUBLIC_DIR/ui-state.json" 0644
+}
+
+# Dominios permitidos según el modo, sin los marcados como piratería.
+allowed_domains() {
+	{
+		mdm_host
+		for d in $BASE_DOMAINS $NTP_DOMAINS; do echo "$d"; done
+		if [ "$MODE" = active ] && [ -s "$CONFIG_FILE" ]; then
+			jq -r '.apps[].domains[]?' "$CONFIG_FILE"
+		fi
+	} | tr 'A-Z' 'a-z' | grep -x '[a-z0-9.-]\{1,253\}' | grep '\.' | sort -u > "$RUN_DIR/allow.tmp"
+
+	if [ -s "$CONFIG_FILE" ]; then
+		# Validado también acá: estas líneas terminan en la configuración de dnsmasq.
+		jq -r '.blocked_domains[]?' "$CONFIG_FILE" | tr 'A-Z' 'a-z' |
+			grep -x '[a-z0-9.-]\{1,253\}' | grep '\.' | sort -u > "$RUN_DIR/deny.tmp"
+	else
+		: > "$RUN_DIR/deny.tmp"
+	fi
+
+	while read -r d; do
+		blocked=0
+		while read -r b; do
+			[ -n "$b" ] || continue
+			case "$d" in "$b" | *".$b") blocked=1; break ;; esac
+		done < "$RUN_DIR/deny.tmp"
+		[ $blocked = 0 ] && echo "$d"
+	done < "$RUN_DIR/allow.tmp"
+}
+
+apply_chromium_policy() {
+	[ -f "$RUN_DIR/allowed" ] && mv -f "$RUN_DIR/allowed" "$RUN_DIR/allowed.prev"
+	allowed_domains > "$RUN_DIR/allowed"
+	# En Chromium gana el filtro más específico: un dominio pirata dentro de uno
+	# permitido (ej. x.netflix.com) queda bloqueado igual.
+	new=$(jq -cRn --arg ui "$UI_ORIGIN" --rawfile allow "$RUN_DIR/allowed" --rawfile deny "$RUN_DIR/deny.tmp" '
+		def lines($s): $s | split("\n") | map(select(length > 0));
+		{URLBlocklist: (["*"] + lines($deny)), URLAllowlist: ([$ui] + lines($allow))}')
+	current=$(cat "$POLICY_FILE" 2>/dev/null)
+	# Si el archivo no es lo último que escribió el agente, alguien lo tocó.
+	if [ -f "$RUN_DIR/policy.last" ] && [ "$current" != "$(cat "$RUN_DIR/policy.last")" ]; then
+		add_event policy_tampered '{}'
+	fi
+	printf '%s\n' "$new" > "$RUN_DIR/policy.last"
+	[ "$current" = "$new" ] && return 1
+	mkdir -p "$(dirname "$POLICY_FILE")"
+	printf '%s\n' "$new" | write_atomic "$POLICY_FILE" 0644 || { log "no se pudo escribir la política"; return 1; }
+	log "política de Chromium actualizada ($(wc -l < "$RUN_DIR/allowed") dominios)"
+	return 0
+}
+
+dns_running() { [ -f "$DNS_PID" ] && kill -0 "$(cat "$DNS_PID")" 2>/dev/null; }
+
+# Toma los DNS que dejó DHCP como upstream de dnsmasq y, si el filtro está
+# vivo, fuerza el resolver local (DHCP vuelve a pisarlo en cada renovación).
+take_over_resolv() {
+	resolv=$(readlink -f /etc/resolv.conf 2>/dev/null || echo /etc/resolv.conf)
+	ups=$(sed -n 's/^nameserver[[:space:]]\{1,\}\([0-9a-fA-F.:]\{1,\}\).*/\1/p' "$resolv" 2>/dev/null |
+		grep -v '^127\.' | grep -vx '::1')
+	if [ -n "$ups" ]; then
+		printf 'nameserver %s\n' $ups > "$DNS_UPSTREAM.new"
+		cmp -s "$DNS_UPSTREAM.new" "$DNS_UPSTREAM" || { chmod 0644 "$DNS_UPSTREAM.new"; mv -f "$DNS_UPSTREAM.new" "$DNS_UPSTREAM"; }
+		rm -f "$DNS_UPSTREAM.new"
+	elif [ ! -s "$DNS_UPSTREAM" ]; then
+		printf 'nameserver %s\n' $FALLBACK_DNS | write_atomic "$DNS_UPSTREAM" 0644
+	fi
+	# Sin dnsmasq no se toca resolv.conf: la política de Chromium sigue filtrando
+	# y el agente conserva conectividad para sincronizar.
+	dns_running || return 0
+	[ -z "$ups" ] && grep -qx 'nameserver 127.0.0.1' "$resolv" 2>/dev/null && return 0
+	echo 'nameserver 127.0.0.1' | write_atomic "$resolv" 0644
+}
+
+apply_dns_filter() {
+	command -v dnsmasq >/dev/null || return 0
+	{
+		echo "listen-address=127.0.0.1"
+		echo "bind-interfaces"
+		echo "port=53"
+		echo "user=nobody"
+		echo "resolv-file=$DNS_UPSTREAM"
+		echo "domain-needed"
+		echo "bogus-priv"
+		echo "stop-dns-rebind"
+		echo "rebind-localhost-ok"
+		echo "cache-size=1000"
+		echo "log-queries"
+		echo "log-facility=$DNS_LOG"
+		# Todo lo que no esté en la lista blanca resuelve a 0.0.0.0 (y queda en el log).
+		echo "address=/#/0.0.0.0"
+		echo "address=/#/::"
+		sed 's#.*#server=/&/\##' "$RUN_DIR/allowed"
+		[ -s "$RUN_DIR/deny.tmp" ] && sed 's#.*#address=/&/0.0.0.0#' "$RUN_DIR/deny.tmp"
+	} > "$DNS_CONF.new"
+
+	if dns_running; then
+		cmp -s "$DNS_CONF.new" "$DNS_CONF" && { rm -f "$DNS_CONF.new"; return 0; }
+		kill "$(cat "$DNS_PID")" 2>/dev/null
+		sleep 1
+	fi
+	mv -f "$DNS_CONF.new" "$DNS_CONF"
+	touch "$DNS_LOG" && chown nobody "$DNS_LOG" 2>/dev/null
+	dnsmasq --conf-file="$DNS_CONF" --pid-file="$DNS_PID" || {
+		log "dnsmasq no arrancó"
+		add_event_once dns_filter_down '{}'
+	}
+}
+
+# Solo dnsmasq (usuario nobody) puede hablar DNS hacia afuera; bloquea DoT.
+apply_firewall() {
+	for ipt in iptables ip6tables; do
+		command -v $ipt >/dev/null || continue
+		$ipt -C OUTPUT -j NEX_DNS 2>/dev/null && continue
+		$ipt -N NEX_DNS 2>/dev/null || $ipt -F NEX_DNS
+		$ipt -A NEX_DNS -o lo -j RETURN
+		if ! $ipt -A NEX_DNS -m owner --uid-owner nobody -j RETURN 2>/dev/null; then
+			# Sin match owner, rechazar DNS cortaría también a dnsmasq.
+			log "$ipt sin match owner (kernel nex-mdm.config): el filtro DNS no es obligatorio"
+			[ $ipt = iptables ] && add_event_once firewall_unavailable '{}'
+			$ipt -F NEX_DNS
+			$ipt -X NEX_DNS 2>/dev/null
+			continue
+		fi
+		for p in udp tcp; do
+			$ipt -A NEX_DNS -p $p --dport 53 -j REJECT
+		done
+		$ipt -A NEX_DNS -p tcp --dport 853 -j REJECT
+		$ipt -I OUTPUT 1 -j NEX_DNS
+	done
+}
+
+# Reinicia Chromium (S99nex-os lo relanza) para cortar sesiones abiertas
+# (ej. un stream en curso) y volver a la UI.
+restart_ui() {
+	log "$1: reiniciando la interfaz"
+	killall chromium 2>/dev/null || true
+}
+
+# true si algún dominio que estaba permitido dejó de estarlo.
+allowlist_shrank() {
+	[ -s "$RUN_DIR/allowed.prev" ] || return 1
+	[ -n "$(grep -vxF -f "$RUN_DIR/allowed" "$RUN_DIR/allowed.prev")" ]
+}
+
+report_blocked() {
+	[ -s "$CONFIG_FILE" ] && [ -s "$DNS_LOG" ] || return 0
+	mv -f "$DNS_LOG" "$DNS_LOG.sending"
+	# dnsmasq mantiene el descriptor viejo: se lo reabre con SIGUSR2.
+	touch "$DNS_LOG" && chown nobody "$DNS_LOG" 2>/dev/null
+	[ -f "$DNS_PID" ] && kill -USR2 "$(cat "$DNS_PID")" 2>/dev/null
+
+	host=$(mdm_host)
+	events=$(sed -n 's/.* config \([A-Za-z0-9._-]\{1,253\}\) is 0\.0\.0\.0$/\1/p' "$DNS_LOG.sending" |
+		tr 'A-Z' 'a-z' | grep -vx "$host" | sort | uniq -c | sort -rn | head -n 200 |
+		awk '{printf "{\"domain\":\"%s\",\"hits\":%d}\n", $2, $1}' | jq -sc .)
+	rm -f "$DNS_LOG.sending"
+	[ "$events" = "[]" ] || [ -z "$events" ] && return 0
+	rpc mdm_device_report "$(jq -nc --argjson e "$events" '{p_events: $e}')" >/dev/null ||
+		log "no se pudo enviar el reporte de bloqueos"
+}
+
+# Confirma al servidor el bloqueo/desbloqueo realmente aplicado (sobrevive a reinicios).
+report_mode_change() {
+	cur="$MODE:$LOCK_KIND"
+	last=$(cat "$APPLIED_FILE" 2>/dev/null)
+	[ "$cur" = "$last" ] && return 0
+	case "$MODE" in starting | unpaired) return 0 ;; esac
+	if [ "$MODE" = locked ]; then
+		add_event lock_applied "$(jq -nc --arg k "$LOCK_KIND" '{lock_kind: $k}')"
+		[ "$LOCK_KIND" = clock ] && add_event clock_rollback '{}'
+	elif [ "${last%%:*}" = locked ]; then
+		add_event unlock_applied '{}'
+	fi
+	echo "$cur" | write_atomic "$APPLIED_FILE" 0600
+}
+
+main() {
+	mkdir -p "$STATE_DIR" "$RUN_DIR" "$PUBLIC_DIR"
+	chmod 0700 "$STATE_DIR"
+	command -v jq >/dev/null && command -v curl >/dev/null || { log "faltan jq/curl"; exit 1; }
+
+	last_sync_try=0
+	last_report=$(now)
+	prev_mode=""
+	# Reinicio del agente sin reinicio del equipo: alguien lo mató (init lo relanza).
+	if [ -e "$RUN_DIR/started" ]; then
+		add_event agent_restarted '{}'
+	else
+		add_event agent_started "$(jq -nc --arg fw "$FIRMWARE" '{firmware: $fw}')"
+	fi
+	touch "$RUN_DIR/started"
+	apply_firewall
+
+	while :; do
+		t=$(now)
+		# Mientras espera vinculación (o el primer sync) consulta más seguido.
+		interval=$SYNC_INTERVAL
+		case "$prev_mode" in "" | starting | unpaired) interval=10 ;; esac
+		if [ $((t - last_sync_try)) -ge "$interval" ]; then
+			last_sync_try=$t
+			sync_remote && update_logo
+		fi
+
+		compute_mode
+		policy_changed=0
+		apply_chromium_policy && policy_changed=1
+		take_over_resolv
+		apply_dns_filter
+		publish_ui_state
+
+		report_mode_change
+		[ "$MODE" != starting ] && [ "$MODE" != unpaired ] && [ ! -e /etc/nex-os-hardened ] &&
+			add_event_once image_not_hardened '{}'
+
+		if [ "$prev_mode" = active ] && [ "$MODE" != active ]; then
+			restart_ui "modo $MODE"
+		elif [ $policy_changed = 1 ] && [ "$MODE" = active ] && allowlist_shrank; then
+			restart_ui "app desactivada"
+		fi
+		prev_mode=$MODE
+
+		if [ $((t - last_report)) -ge "$REPORT_INTERVAL" ]; then
+			last_report=$t
+			report_blocked
+		fi
+		sleep 5
+	done
+}
+
+main "$@"
