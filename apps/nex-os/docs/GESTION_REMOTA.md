@@ -677,3 +677,29 @@ PG_BIN=/ruta/a/postgres/bin apps/nex-os/supabase/tests/run.sh   # o con psql/ini
   - las validaciones de `mdm_update_company`;
   - `mdm_isp_set_restricted` y `service_state`;
   - la RLS del historial.
+
+## v9: estados escalonados y rotación de claves (equipo y TV)
+
+- **Modo `restricted` en el agente.** Viene de una restricción manual (`restricted`) o de `payment.restrict_at`.
+  - El menú, el Wi-Fi, los datos de pago y el código de desbloqueo siguen funcionando.
+  - Las apps se muestran deshabilitadas, sin dominios en la lista blanca y sin atestación.
+  - Si `restrict_at` llega con un valor inválido, el equipo queda restringido (falla cerrado).
+  - Prioridad: bloqueo manual > pago vencido > reloj > offline > restringido manual > restringido por pago > aviso.
+- **Aviso y datos de pago.** `ui-state.json` publica `service_warning` y
+  `payment {due, phone, url, message}`. Sin control de pago se usan el teléfono y el link de la empresa.
+  - En la TV se muestran el vencimiento, el teléfono y un QR del link de pago, generado en el equipo.
+  - Se ven en el banner de aviso, en el home restringido y en la pantalla de bloqueo por pago o manual.
+- **Varias claves aceptadas.**
+  - El equipo acepta cualquier clave de `/etc/nex-agent/mdm-sign.d/*.pem` y, para releases,
+    `/etc/nex-agent/release.d/*.pem`.
+  - `build.sh` recibe varias rutas separadas por `:` en `NEX_MDM_SIGN_PUBKEY` / `NEX_RELEASE_PUBKEY` y avisa si
+    falta una clave de reserva.
+  - Con la de reserva ya en las imágenes, rotar es cambiar `NEX_SIGNING_KEY` en Supabase, sin reflashear.
+
+### Pruebas
+
+- `tools/nex-os/tests/test-agent.sh` (agente, 43 escenarios): suma rotación, aviso → restringido → bloqueado,
+  restricción manual, `restrict_at` corrupto y teléfono de la empresa.
+- `npm --prefix apps/nex-os test` (vitest, 42 pruebas): parseo defensivo del estado, apps deshabilitadas,
+  atestación, datos de pago, URL de lanzamiento y relay.
+- `PG_BIN=... apps/nex-os/supabase/tests/run.sh` (SQL, 148 pruebas).
