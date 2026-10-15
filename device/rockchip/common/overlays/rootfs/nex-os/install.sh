@@ -25,8 +25,8 @@ chmod 0755 "$TARGET_DIR/etc/init.d/S99nex-os"
 	exit 1
 }
 # Sin la clave pública de firma el equipo nunca aceptaría una configuración.
-[ -s "$SOURCE_DIR/mdm-sign.pub.pem" ] || {
-	echo "Missing mdm-sign.pub.pem. Run tools/nex-os/build.sh with NEX_MDM_SIGN_PUBKEY." >&2
+ls "$SOURCE_DIR"/mdm-sign.d/*.pem >/dev/null 2>&1 || {
+	echo "Missing mdm-sign.d/*.pem. Run tools/nex-os/build.sh with NEX_MDM_SIGN_PUBKEY." >&2
 	exit 1
 }
 for bin in jq curl dnsmasq openssl; do
@@ -38,13 +38,17 @@ done
 
 install -D -m 0755 "$SOURCE_DIR/nex-agent" "$TARGET_DIR/usr/bin/nex-agent"
 install -D -m 0600 "$SOURCE_DIR/nex-agent.conf" "$TARGET_DIR/etc/nex-agent.conf"
-install -D -m 0644 "$SOURCE_DIR/mdm-sign.pub.pem" "$TARGET_DIR/etc/nex-agent/mdm-sign.pub.pem"
+# Varias claves aceptadas: la actual y las de reserva (rotación sin reflashear).
+rm -rf "$TARGET_DIR/etc/nex-agent/mdm-sign.d" "$TARGET_DIR/etc/nex-agent/release.d" \
+	"$TARGET_DIR/etc/nex-agent/mdm-sign.pub.pem" "$TARGET_DIR/etc/nex-agent/release.pub.pem"
+install -d -m 0755 "$TARGET_DIR/etc/nex-agent/mdm-sign.d"
+install -m 0644 "$SOURCE_DIR"/mdm-sign.d/*.pem "$TARGET_DIR/etc/nex-agent/mdm-sign.d/"
 # Sin clave de releases el equipo ignora las actualizaciones remotas.
-if [ -s "$SOURCE_DIR/release.pub.pem" ]; then
-	install -D -m 0644 "$SOURCE_DIR/release.pub.pem" "$TARGET_DIR/etc/nex-agent/release.pub.pem"
+if ls "$SOURCE_DIR"/release.d/*.pem >/dev/null 2>&1; then
+	install -d -m 0755 "$TARGET_DIR/etc/nex-agent/release.d"
+	install -m 0644 "$SOURCE_DIR"/release.d/*.pem "$TARGET_DIR/etc/nex-agent/release.d/"
 else
-	echo "WARNING: no release.pub.pem: remote firmware updates disabled in this image." >&2
-	rm -f "$TARGET_DIR/etc/nex-agent/release.pub.pem"
+	echo "WARNING: no release keys: remote firmware updates disabled in this image." >&2
 fi
 # Número de build (entero creciente): el equipo solo instala releases mayores.
 if [ -s "$SOURCE_DIR/nex-os.build" ]; then

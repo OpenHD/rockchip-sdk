@@ -24,6 +24,13 @@ const ERRORS: Record<string, string> = {
   invalid_psk: 'La contraseña tiene que tener entre 8 y 63 caracteres.',
   invalid_ssid: 'Nombre de red inválido.',
   invalid_code: 'El código tiene que tener 8 dígitos.',
+  // Códigos del CGI (device/.../nex-os/cgi-nex).
+  invalid: 'Datos inválidos. Revisalos y probá de nuevo.',
+  agent: 'El sistema del equipo todavía está iniciando. Probá de nuevo en unos segundos.',
+  length: 'El dato es demasiado largo.',
+  origin: 'Pedido rechazado por seguridad.',
+  content_type: 'Pedido rechazado por seguridad.',
+  method: 'Pedido rechazado por seguridad.',
 };
 
 export function relayErrorText(code: string): string {

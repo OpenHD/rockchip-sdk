@@ -54,8 +54,10 @@ UNLOCK_RESULT=$RUN_DIR/unlock_result
 UPDATE_DIR=$STATE_DIR/update
 WIFI_SCAN=$RUN_DIR/wifi_scan.json
 WIFI_ERROR=$RUN_DIR/wifi_error
-MDM_PUBKEY=/etc/nex-agent/mdm-sign.pub.pem
-RELEASE_PUBKEY=/etc/nex-agent/release.pub.pem
+# Claves públicas aceptadas (varias, para poder rotar sin reflashear: si una se
+# filtra, el servidor pasa a firmar con otra que la imagen ya trae).
+MDM_KEYS="/etc/nex-agent/mdm-sign.pub.pem /etc/nex-agent/mdm-sign.d/*.pem"
+RELEASE_KEYS="/etc/nex-agent/release.pub.pem /etc/nex-agent/release.d/*.pem"
 PAIRING_FILE=$STATE_DIR/pairing.json
 LAST_SYNC_FILE=$STATE_DIR/last_sync
 SERVER_EPOCH_FILE=$STATE_DIR/server_epoch
@@ -120,7 +122,7 @@ status_json() {
 	fw=false; iptables -C OUTPUT -j NEX_DNS 2>/dev/null && fw=true
 	up=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
 	free=$(df -m /userdata 2>/dev/null | awk 'NR==2 {print $4}')
-	jq -nc --arg mode "${MODE:-starting}" --arg kind "${LOCK_KIND:-}" --argjson hardened $hardened \
+	jq -nc --arg mode "${MODE:-starting}" --arg kind "${LOCK_KIND:-${RESTRICT_KIND:-}}" --argjson hardened $hardened \
 		--argjson dns $dns --argjson fw $fw --argjson up "${up:-0}" --argjson free "${free:-0}" \
 		--argjson v "$AGENT_VERSION" --argjson build "$BUILD" --arg upd "$(update_state)" \
 		'{mode: $mode, lock_kind: (if $kind == "" then null else $kind end), hardened: $hardened,
@@ -165,11 +167,28 @@ rpc() { post "rest/v1/rpc/$1" "$2"; }
 # La configuración de un equipo vinculado solo llega firmada (Edge Function mdm-sync).
 signed_sync() { post functions/v1/mdm-sync "$1"; }
 
+# verify_sig "<claves>" <firma> <datos>: vale si la firma es de alguna de las claves.
+# 2 = no hay ninguna clave instalada.
+verify_sig() {
+	found=2
+	for k in $1; do
+		[ -r "$k" ] || continue
+		found=1
+		openssl dgst -sha256 -verify "$k" -signature "$2" "$3" >/dev/null 2>&1 && return 0
+	done
+	return $found
+}
+
+has_keys() {
+	for k in $1; do [ -r "$k" ] && return 0; done
+	return 1
+}
+
 # verify_config <payload> <firma>: firma del servidor + atada a este hardware.
 verify_config() {
 	[ -s "$1" ] && [ -s "$2" ] || return 1
-	[ -r "$MDM_PUBKEY" ] || { add_event_once signing_key_missing '{}'; log "falta $MDM_PUBKEY"; return 1; }
-	openssl dgst -sha256 -verify "$MDM_PUBKEY" -signature "$2" "$1" >/dev/null 2>&1 || {
+	has_keys "$MDM_KEYS" || { add_event_once signing_key_missing '{}'; log "no hay claves de firma del MDM"; return 1; }
+	verify_sig "$MDM_KEYS" "$2" "$1" || {
 		add_event_once config_signature_invalid '{}'
 		log "configuración con firma inválida: se descarta"
 		return 1
@@ -276,12 +295,15 @@ sync_remote() {
 	return 0
 }
 
-# Modo efectivo: starting | unpaired | locked | active
-# Prioridad: bloqueo manual > pago vencido > reloj inválido > días sin conexión.
+# Modo efectivo: starting | unpaired | locked | restricted | active
+# Prioridad: bloqueo manual > pago vencido > reloj inválido > días sin conexión >
+# restringido manual > restringido por pago > aviso de pago.
+# En "restringido" el menú y la red funcionan, pero no las apps.
 compute_mode() {
 	REASON=""
 	LOCK_KIND=""
 	PAY_WARN=0
+	RESTRICT_KIND=
 	UNLOCK_UNTIL=0
 	if [ -s "$CONFIG_FILE" ]; then
 		# Última hora del servidor, firmada: es el ancla del límite offline (no se
@@ -295,6 +317,8 @@ compute_mode() {
 		# Si hay control de pago pero la fecha no es un número válido, se bloquea (falla cerrado).
 		lock_at=$(jq -r 'if .payment == null then 0 else (.payment.lock_at | if type == "number" then floor else 1 end) end' "$CONFIG_FILE")
 		warn_at=$(jq -r '.payment.warn_at // 0 | if type == "number" then floor else 0 end' "$CONFIG_FILE")
+		# Si hay fecha de restricción pero no es un número válido, se restringe (falla cerrado).
+		restrict_at=$(jq -r '.payment.restrict_at // 0 | if type == "number" then floor else 1 end' "$CONFIG_FILE")
 		if [ "$(jq -r '.locked' "$CONFIG_FILE")" = true ]; then
 			MODE=locked
 			LOCK_KIND=manual
@@ -312,16 +336,27 @@ compute_mode() {
 			MODE=locked
 			LOCK_KIND=offline
 			REASON="El equipo estuvo más de $days días sin conexión. Conectalo a internet."
+		elif [ "$(jq -r '.restricted' "$CONFIG_FILE")" = true ]; then
+			MODE=restricted
+			RESTRICT_KIND=manual
+			REASON=$(jq -r '.restrict_reason // ""' "$CONFIG_FILE")
+		elif [ "$restrict_at" -gt 0 ] && [ "$t" -ge "$restrict_at" ]; then
+			MODE=restricted
+			RESTRICT_KIND=payment
+			REASON=$(jq -r '.payment.message // ""' "$CONFIG_FILE")
 		else
 			MODE=active
 			[ "$warn_at" -gt 0 ] && [ "$t" -ge "$warn_at" ] && PAY_WARN=1
 		fi
-		# Código de desbloqueo offline: vale para bloqueo manual, de pago u offline,
-		# nunca para un reloj inválido.
-		if [ "$MODE" = locked ] && [ "$LOCK_KIND" != clock ] && override_valid "$t" "$last" "$days"; then
+		# Código de desbloqueo offline: vale para bloqueo manual, de pago u offline y
+		# para la restricción, nunca para un reloj inválido.
+		if { [ "$MODE" = locked ] && [ "$LOCK_KIND" != clock ] || [ "$MODE" = restricted ]; } &&
+			override_valid "$t" "$last" "$days"; then
 			MODE=active
 			LOCK_KIND=""
+			RESTRICT_KIND=""
 			REASON=""
+			PAY_WARN=0
 		fi
 	elif [ -s "$PAIRING_FILE" ]; then
 		MODE=unpaired
@@ -381,7 +416,7 @@ publish_ui_state() {
 	scan=$WIFI_SCAN; [ -s "$scan" ] || scan=/dev/null
 	ures=$(cat "$UNLOCK_RESULT" 2>/dev/null)
 	jq -n --arg mode "$MODE" --arg reason "$REASON" --arg logo "$logo" \
-		--arg kind "$LOCK_KIND" --argjson warn "$PAY_WARN" \
+		--arg kind "$LOCK_KIND" --arg rkind "$RESTRICT_KIND" --argjson warn "$PAY_WARN" \
 		--slurpfile cfg "$cfg" --slurpfile pair "$pair" --argjson t "$(now)" \
 		--argjson wifi "$(wifi_status_json)" --slurpfile scan "$scan" \
 		--arg ures "${ures% *}" --arg uat "${ures#* }" --argjson until "$UNLOCK_UNTIL" \
@@ -395,12 +430,20 @@ publish_ui_state() {
 			device_name: $c.device.name,
 			lock_message: (if $mode == "locked" then $c.company.lock_message else null end),
 			lock_kind: (if $kind == "" then null else $kind end),
+			restrict_kind: (if $rkind == "" then null else $rkind end),
+			service_warning: ($warn == 1),
+			payment: (if $warn == 1 or $mode == "restricted" or ($mode == "locked" and ($kind == "payment" or $kind == "manual"))
+				then {due: ($c.payment.paid_until // null), phone: ($c.payment.phone // null),
+				      url: ($c.payment.url // null), message: ($c.payment.message // null)}
+				else null end),
 			lock_reason: (if $reason == "" then null else $reason end),
 			payment_due: (if $warn == 1 then $c.payment.paid_until else null end),
 			pairing_code: (if $mode == "unpaired" then $p.pairing_code else null end),
 			pairing_expires_at: (if $mode == "unpaired" then $p.pairing_expires_at else null end),
 			apps: (if $mode == "active"
 				then [($c.apps // [])[] | {id, name, kind, launch_url, pass_attestation: (.pass_attestation == true)}]
+				elif $mode == "restricted"
+				then [($c.apps // [])[] | {id, name, kind, launch_url: null, pass_attestation: false, disabled: true}]
 				else [] end),
 			attestation: (if $mode == "active" then ($c.attestation // null) else null end),
 			wifi: (if $wifi == null then null else $wifi + {
@@ -630,7 +673,8 @@ unlock_result() { echo "$1 $(now)" | write_atomic "$UNLOCK_RESULT" 0600; }
 
 try_unlock_code() {
 	code=$1
-	if [ "$MODE" != locked ] || [ "$LOCK_KIND" = clock ] || [ ! -s "$CONFIG_FILE" ]; then
+	if [ ! -s "$CONFIG_FILE" ] || { [ "$MODE" != locked ] && [ "$MODE" != restricted ]; } ||
+		[ "$LOCK_KIND" = clock ]; then
 		unlock_result unavailable
 		return 0
 	fi
@@ -788,7 +832,7 @@ set_update_state() { mkdir -p "$UPDATE_DIR"; echo "$1" > "$UPDATE_DIR/state"; }
 clear_update() { rm -rf "$UPDATE_DIR"; }
 
 check_update() {
-	[ -s "$CONFIG_FILE" ] && [ -r "$RELEASE_PUBKEY" ] || return 0
+	[ -s "$CONFIG_FILE" ] && has_keys "$RELEASE_KEYS" || return 0
 	build=$(update_field build)
 	case "$build" in '' | *[!0-9]*) [ -d "$UPDATE_DIR" ] && clear_update; return 0 ;; esac
 	[ "$build" -gt "$BUILD" ] || { clear_update; return 0; }
@@ -810,8 +854,7 @@ check_update() {
 		# La firma se verifica antes de bajar nada.
 		printf 'nex-update:v1:%s:%s' "$build" "$sha" > "$UPDATE_DIR/manifest"
 		printf '%s' "$sig" | openssl base64 -d -A > "$UPDATE_DIR/manifest.sig" 2>/dev/null
-		if ! openssl dgst -sha256 -verify "$RELEASE_PUBKEY" -signature "$UPDATE_DIR/manifest.sig" \
-			"$UPDATE_DIR/manifest" >/dev/null 2>&1; then
+		if ! verify_sig "$RELEASE_KEYS" "$UPDATE_DIR/manifest.sig" "$UPDATE_DIR/manifest"; then
 			set_update_state failed
 			add_event update_signature_invalid "$(jq -nc --argjson b "$build" '{build: $b}')"
 			return 0
@@ -864,14 +907,16 @@ check_update() {
 
 # Confirma al servidor el bloqueo/desbloqueo realmente aplicado (sobrevive a reinicios).
 report_mode_change() {
-	cur="$MODE:$LOCK_KIND"
+	cur="$MODE:$LOCK_KIND$RESTRICT_KIND"
 	last=$(cat "$APPLIED_FILE" 2>/dev/null)
 	[ "$cur" = "$last" ] && return 0
 	case "$MODE" in starting | unpaired) return 0 ;; esac
 	if [ "$MODE" = locked ]; then
 		add_event lock_applied "$(jq -nc --arg k "$LOCK_KIND" '{lock_kind: $k}')"
 		[ "$LOCK_KIND" = clock ] && add_event clock_rollback '{}'
-	elif [ "${last%%:*}" = locked ]; then
+	elif [ "$MODE" = restricted ]; then
+		add_event restrict_applied "$(jq -nc --arg k "$RESTRICT_KIND" '{restrict_kind: $k}')"
+	elif [ "${last%%:*}" = locked ] || [ "${last%%:*}" = restricted ]; then
 		add_event unlock_applied '{}'
 	fi
 	echo "$cur" | write_atomic "$APPLIED_FILE" 0600

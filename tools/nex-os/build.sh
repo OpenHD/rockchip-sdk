@@ -39,21 +39,29 @@ if [ "${NEX_MDM:-1}" = 1 ]; then
 	} > "$AGENT_CONF"
 	umask 022
 
-	# Claves públicas (ver tools/nex-os/keys/): la de firma del MDM es obligatoria,
-	# la de releases habilita las actualizaciones remotas.
+	# Claves públicas (ver tools/nex-os/keys/). Se aceptan varias separadas por ":"
+	# para poder rotar sin reflashear (la imagen trae la actual y las de reserva).
+	# La del MDM es obligatoria; la de releases habilita las actualizaciones remotas.
 	OVERLAY_DIR="$SDK_DIR/device/rockchip/common/overlays/rootfs/nex-os"
-	copy_pubkey() { # <pem> <destino> <required|optional> <variable>
-
+	copy_pubkeys() { # <pem[:pem...]> <directorio destino> <required|optional> <variable>
+		rm -rf "${OVERLAY_DIR:?}/$2"
 		if [ -z "$1" ]; then
-			[ "$3" = required ] && { echo "$4 is required (public key PEM)" >&2; exit 1; }
-			rm -f "$OVERLAY_DIR/$2"
+			[ "$3" = required ] && { echo "$4 is required (public key PEM, several separated by :)" >&2; exit 1; }
 			return 0
 		fi
-		openssl pkey -pubin -in "$1" -noout 2>/dev/null || { echo "$4: $1 is not a public key PEM" >&2; exit 1; }
-		openssl pkey -pubin -in "$1" -out "$OVERLAY_DIR/$2"
+		mkdir -p "$OVERLAY_DIR/$2"
+		n=0
+		IFS=: read -r -a pems <<< "$1"
+		for pem in "${pems[@]}"; do
+			[ -n "$pem" ] || continue
+			openssl pkey -pubin -in "$pem" -noout 2>/dev/null || { echo "$4: $pem is not a public key PEM" >&2; exit 1; }
+			n=$((n + 1))
+			openssl pkey -pubin -in "$pem" -out "$OVERLAY_DIR/$2/key$n.pem"
+		done
+		[ "$n" -ge 2 ] || echo "WARNING: $4 has a single key: if it leaks, every box must be reflashed (add a backup key)" >&2
 	}
-	copy_pubkey "${NEX_MDM_SIGN_PUBKEY:-}" mdm-sign.pub.pem required NEX_MDM_SIGN_PUBKEY
-	copy_pubkey "${NEX_RELEASE_PUBKEY:-}" release.pub.pem optional NEX_RELEASE_PUBKEY
+	copy_pubkeys "${NEX_MDM_SIGN_PUBKEY:-}" mdm-sign.d required NEX_MDM_SIGN_PUBKEY
+	copy_pubkeys "${NEX_RELEASE_PUBKEY:-}" release.d optional NEX_RELEASE_PUBKEY
 	# Número de build creciente (las releases firmadas lo usan para no volver atrás).
 	NEX_OS_BUILD=${NEX_OS_BUILD:-$(date -u +%s)}
 	case "$NEX_OS_BUILD" in '' | *[!0-9]*) echo "NEX_OS_BUILD must be an integer" >&2; exit 1 ;; esac

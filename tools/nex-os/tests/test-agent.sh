@@ -6,13 +6,16 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 AGENT_SRC=${1:-$HERE/../../../device/rockchip/common/overlays/rootfs/nex-os/nex-agent}
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
-mkdir -p "$T"/{userdata,run,etc/nex-agent,policies,keys}
+mkdir -p "$T"/{userdata,run,etc/nex-agent/mdm-sign.d,etc/nex-agent/release.d,policies,keys}
 export PATH=$HERE/bin:$PATH
 
 openssl genrsa -out "$T/keys/mdm.key" 3072 2>/dev/null
-openssl rsa -in "$T/keys/mdm.key" -pubout -out "$T/etc/nex-agent/mdm-sign.pub.pem" 2>/dev/null
+openssl rsa -in "$T/keys/mdm.key" -pubout -out "$T/etc/nex-agent/mdm-sign.d/key1.pem" 2>/dev/null
+# Clave de reserva: la imagen la trae para poder rotar sin reflashear.
+openssl genrsa -out "$T/keys/backup.key" 3072 2>/dev/null
+openssl rsa -in "$T/keys/backup.key" -pubout -out "$T/etc/nex-agent/mdm-sign.d/key2.pem" 2>/dev/null
 openssl genrsa -out "$T/keys/rel.key" 3072 2>/dev/null
-openssl rsa -in "$T/keys/rel.key" -pubout -out "$T/etc/nex-agent/release.pub.pem" 2>/dev/null
+openssl rsa -in "$T/keys/rel.key" -pubout -out "$T/etc/nex-agent/release.d/key1.pem" 2>/dev/null
 openssl genrsa -out "$T/keys/evil.key" 3072 2>/dev/null
 echo 100 > "$T/etc/nex-os-build"
 
@@ -96,10 +99,13 @@ load_config; run_cycle; check "payload editado se descarta (espera)" '[ "$MODE" 
 
 RESP=$(make_resp '.' "$T/keys/evil.key"); sync_remote
 check "firma con otra clave se rechaza" '[ ! -s "$CONFIG_FILE" ]'
-RESP=$(make_resp '.hardware_id = "bbbb"'); sync_remote
-check "configuración de otro hardware se rechaza" '[ ! -s "$CONFIG_FILE" ]'
-RESP=$(jq -nc '{status: "paired", company: {id: "c"}, apps: [], locked: false}'); sync_remote
-check "respuesta sin firma (v7) se rechaza" '[ ! -s "$CONFIG_FILE" ]'
+RESP=$(make_resp '.' "$T/keys/backup.key"); sync_remote
+check "rotación: la clave de reserva de la imagen se acepta" '[ -s "$CONFIG_FILE" ]'
+load_config; check "rotación: sigue verificando al reiniciar" '[ -s "$CONFIG_FILE" ]'
+RESP=$(make_resp '.hardware_id = "bbbb"')
+check "configuración de otro hardware se rechaza (y se conserva la válida)" '! sync_remote && jq -e ".hardware_id == \"$HW\"" "$SIGNED_PAYLOAD" >/dev/null'
+RESP=$(jq -nc '{status: "paired", company: {id: "c"}, apps: [], locked: false}')
+check "respuesta sin firma (v7) se rechaza (y se conserva la válida)" '! sync_remote && load_config && [ -s "$CONFIG_FILE" ]'
 
 # Bloqueo manual + código offline
 RESP=$(make_resp '.locked = true | .lock_reason = "Deuda"'); sync_remote; run_cycle
@@ -145,6 +151,26 @@ check "reloj atrasado bloquea por reloj" '[ "$MODE" = locked ] && [ "$LOCK_KIND"
 echo "{\"action\":\"unlock_code\",\"code\":\"$(code_for $((NOW / 86400)))\"}" > "$INBOX_DIR/w.json"; run_cycle
 check "el código no sirve contra el bloqueo por reloj" '[ "$MODE" = locked ] && grep -q "^unavailable" "$UNLOCK_RESULT"'
 FAKE_NOW=$NOW
+
+# Estados escalonados: aviso -> restringido -> bloqueado
+RESP=$(make_resp ".payment = {paid_until: \"2026-09-30\", warn_at: $((NOW - 100)), restrict_at: $((NOW + 86400)), lock_at: $((NOW + 5 * 86400)), message: \"Pagá\", phone: \"+54 11 5555-0000\", url: \"https://pagos.example.com/x\"}")
+sync_remote; run_cycle; publish_ui_state
+check "aviso: activo con banner y datos de pago" '[ "$MODE" = active ] && jq -e ".service_warning == true and .payment.phone == \"+54 11 5555-0000\" and .payment.url == \"https://pagos.example.com/x\"" "$PUBLIC_DIR/ui-state.json" >/dev/null'
+FAKE_NOW=$((NOW + 86400)); run_cycle; publish_ui_state
+check "restringido por pago" '[ "$MODE" = restricted ] && [ "$RESTRICT_KIND" = payment ]'
+check "restringido: apps deshabilitadas, sin URL ni atestación" 'jq -e ".apps[0].disabled == true and .apps[0].launch_url == null and .attestation == null" "$PUBLIC_DIR/ui-state.json" >/dev/null'
+check "restringido: sin dominios de apps" '! allowed_domains | grep -qx youtube.com'
+echo "{\"action\":\"unlock_code\",\"code\":\"$(code_for $(((NOW + 86400) / 86400)))\"}" > "$INBOX_DIR/r.json"; run_cycle
+check "el código levanta la restricción" '[ "$MODE" = active ]'
+rm -f "$OVERRIDE_FILE"
+FAKE_NOW=$((NOW + 5 * 86400)); run_cycle
+check "vencido: bloqueado por pago" '[ "$MODE" = locked ] && [ "$LOCK_KIND" = payment ]'
+FAKE_NOW=$NOW
+RESP=$(make_resp '.restricted = true | .restrict_reason = "Mora"'); sync_remote; run_cycle
+check "restringido manual" '[ "$MODE" = restricted ] && [ "$RESTRICT_KIND" = manual ] && [ "$REASON" = Mora ]'
+RESP=$(make_resp '.payment = {paid_until: "2026-09-30", warn_at: 0, restrict_at: "basura", lock_at: 0, message: "x"}'); sync_remote; run_cycle
+check "restrict_at corrupto restringe (falla cerrado)" '[ "$MODE" = restricted ]'
+RESP=$(make_resp '.'); sync_remote; run_cycle
 
 # Pedidos inválidos en la bandeja
 printf '%s' '{"action":"wifi_connect","ssid":"x","psk":"corta"}' > "$INBOX_DIR/v.json"

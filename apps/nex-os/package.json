@@ -15,6 +15,7 @@
     "build:as": "asc assembly/index.ts --target release",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test": "vitest run",
     "sdk:build": "npm run build --workspace=@nex-os/sdk",
     "sdk:publish": "npm publish --workspace=@nex-os/sdk --access public"
   },
@@ -60,6 +61,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
     "vite": "^8.0.1",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "5.0.3"
   }
 }

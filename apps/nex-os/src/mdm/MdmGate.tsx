@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import qrcode from 'qrcode-generator';
-import { KeyRound, Wifi } from 'lucide-react';
+import { KeyRound, Lock, Phone, Wifi } from 'lucide-react';
 import AppRegistry from '../components/AppRegistry';
-import { useAgentState, type MdmApp, type MdmState, type MdmUpdate } from './agentState';
+import { useAgentState, type MdmApp, type MdmPayment, type MdmState, type MdmUpdate } from './agentState';
 import { BACK_KEYS, useDpad } from './dpad';
+import { launchUrl, localQr } from './launch';
 import { tvButton } from './styles';
 import UnlockCodeScreen from './UnlockCodeScreen';
 import WifiScreen from './WifiScreen';
 
 /**
  * Interfaz del TV box gestionado. Muestra solo lo que nex-agent publica:
- * espera, vinculación, bloqueo o el home con las apps habilitadas por la empresa.
+ * espera, vinculación, bloqueo, restringido (home con las apps deshabilitadas) o el home.
  * El bloqueo real lo aplican el agente y las políticas de Chromium; esta capa es la cara visible.
  */
 
@@ -102,10 +102,33 @@ function claimQr(code: string): string | null {
   if (!ADMIN_URL) return null;
   const url = new URL(ADMIN_URL);
   url.searchParams.set('claim', code);
-  const qr = qrcode(0, 'M');
-  qr.addData(url.href);
-  qr.make();
-  return qr.createDataURL(8, 2);
+  return localQr(url.href);
+}
+
+/** Cómo pagar: vencimiento, teléfono y QR del link de pago (los define el ISP). */
+function PaymentInfo({ payment, compact = false }: { payment: MdmPayment; compact?: boolean }) {
+  const qr = useMemo(() => (payment.url ? localQr(payment.url, compact ? 5 : 7) : null), [payment.url, compact]);
+  if (!payment.due && !payment.phone && !qr) return null;
+  return (
+    <div className={`flex items-center gap-8 text-left ${compact ? '' : 'rounded-2xl bg-white/5 border border-white/10 px-8 py-6'}`}>
+      {qr && (
+        <img
+          src={qr}
+          alt="QR para pagar"
+          className={`${compact ? 'h-28 w-28' : 'h-44 w-44'} rounded-xl bg-white p-2 [image-rendering:pixelated]`}
+        />
+      )}
+      <div className="flex flex-col gap-2 text-xl">
+        {payment.due && <p>Vencimiento: <span className="font-semibold">{formatDue(payment.due)}</span></p>}
+        {payment.phone && (
+          <p className="flex items-center gap-2">
+            <Phone className="h-5 w-5" aria-hidden /> <span className="font-semibold tabular-nums">{payment.phone}</span>
+          </p>
+        )}
+        {qr && <p className="text-white/60 text-base">Escaneá el QR con el celular para pagar.</p>}
+      </div>
+    </div>
+  );
 }
 
 function PairingScreen({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
@@ -160,6 +183,7 @@ function LockScreen({ state, onWifi }: { state: MdmState; onWifi: () => void }) 
         {message && <p className="text-2xl text-white/80 leading-relaxed">{message}</p>}
         {detail && <p className="text-lg text-white/50">{detail}</p>}
       </div>
+      {state.payment && (state.lockKind === 'payment' || state.lockKind === 'manual') && <PaymentInfo payment={state.payment} />}
       <div className="flex flex-wrap items-center justify-center gap-4">
         {canUseCode && (
           <button autoFocus className={tvButton} onClick={() => setCodeOpen(true)}>
@@ -188,17 +212,11 @@ function formatDue(date: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
 }
 
-/** URL de lanzamiento: con atestación si la app la pide y el agente tiene una vigente. */
-function launchUrl(app: MdmApp, attestation: string | null): string | null {
-  if (!app.launch_url) return null;
-  if (!app.pass_attestation || !attestation) return app.launch_url;
-  // Va en el fragmento: no viaja en la petición HTTP ni queda en logs del servidor.
-  const sep = app.launch_url.includes('#') ? '&' : '#';
-  return `${app.launch_url}${sep}nex_attestation=${encodeURIComponent(attestation)}`;
-}
-
 function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   const clock = useClock();
+  const restricted = state.mode === 'restricted';
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selectedApp, setOpenApp] = useState<MdmApp | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -228,6 +246,10 @@ function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
 
   const attestation = state.attestation;
   const launch = useCallback((app: MdmApp) => {
+    if (app.disabled) {
+      setNotice(`${app.name} no está disponible: tu servicio está restringido por falta de pago.`);
+      return;
+    }
     const url = app.kind === 'web' ? launchUrl(app, attestation) : null;
     if (url) {
       // Navegación de nivel superior: los servicios de streaming no se dejan embeber.
@@ -241,6 +263,8 @@ function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   // Flechas entre la grilla y el botón de Wi-Fi. Dentro de una app el home no está montado
   // (rootRef queda en null) y las flechas son de la app.
   useDpad(rootRef);
+
+  if (codeOpen && restricted) return <UnlockCodeScreen unlock={state.unlock} onClose={() => setCodeOpen(false)} />;
 
   if (openApp) {
     return (
@@ -274,10 +298,34 @@ function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
         </div>
       </header>
 
-      {state.paymentDue && (
-        <div className="mx-16 mt-6 rounded-xl border border-amber-400/40 bg-amber-400/10 px-6 py-4 text-amber-100 text-lg">
-          Tu pago vence el {formatDue(state.paymentDue)}. Regularizalo para evitar el bloqueo del equipo.
+      {restricted ? (
+        <div className="mx-16 mt-6 rounded-xl border border-rose-400/40 bg-rose-500/10 px-6 py-5 text-rose-50 flex flex-wrap items-center justify-between gap-6">
+          <div className="flex flex-col gap-2 max-w-2xl">
+            <p className="text-2xl font-semibold flex items-center gap-3">
+              <Lock className="h-6 w-6" aria-hidden /> Servicio restringido
+            </p>
+            <p className="text-lg text-rose-50/80">
+              {state.lockReason ?? state.payment?.message ?? 'Tu servicio tiene un pago pendiente. Las aplicaciones vuelven a funcionar cuando se registre el pago.'}
+            </p>
+            {notice && <p role="status" className="text-base text-amber-200">{notice}</p>}
+            <button className={`${tvButton} self-start mt-2`} onClick={() => setCodeOpen(true)}>
+              <KeyRound className="h-6 w-6" aria-hidden /> Tengo un código de desbloqueo
+            </button>
+          </div>
+          {state.payment && <PaymentInfo payment={state.payment} compact />}
         </div>
+      ) : (
+        (state.serviceWarning || state.paymentDue) && (
+          <div className="mx-16 mt-6 rounded-xl border border-amber-400/40 bg-amber-400/10 px-6 py-4 text-amber-100 text-lg flex flex-wrap items-center justify-between gap-6">
+            <p>
+              {state.payment?.due || state.paymentDue
+                ? `Tu pago vence el ${formatDue((state.payment?.due ?? state.paymentDue) as string)}. `
+                : 'Tu servicio tiene un pago pendiente. '}
+              Regularizalo para evitar la restricción del equipo.
+            </p>
+            {state.payment && <PaymentInfo payment={state.payment} compact />}
+          </div>
+        )
       )}
 
       <main className="flex-1 flex items-center justify-center px-16">
@@ -290,10 +338,13 @@ function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
                 key={app.id}
                 data-index={i}
                 onClick={() => launch(app)}
-                className="aspect-video rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center justify-center gap-3 text-2xl font-semibold outline-none transition-transform focus:scale-105 focus:bg-white/15 focus:border-white/60 hover:bg-white/10"
+                aria-disabled={app.disabled || undefined}
+                className={`aspect-video rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center justify-center gap-3 text-2xl font-semibold outline-none transition-transform focus:scale-105 focus:bg-white/15 focus:border-white/60 hover:bg-white/10 ${
+                  app.disabled ? 'opacity-40 grayscale' : ''
+                }`}
               >
                 <span className="h-14 w-14 rounded-full bg-white/10 flex items-center justify-center text-3xl" aria-hidden>
-                  {app.name.charAt(0).toUpperCase()}
+                  {app.disabled ? <Lock className="h-7 w-7" /> : app.name.charAt(0).toUpperCase()}
                 </span>
                 {app.name}
               </button>
@@ -335,6 +386,7 @@ function Screen({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
     case 'locked':
       return <LockScreen state={state} onWifi={onWifi} />;
     case 'active':
+    case 'restricted':
       return <TvHome state={state} onWifi={onWifi} />;
     default:
       return <StartingScreen state={state} onWifi={onWifi} />;

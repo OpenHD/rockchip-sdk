@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react';
  * Estado que publica nex-agent en /agent/ui-state.json (ver docs/GESTION_REMOTA.md).
  * Es de solo lectura: la UI nunca decide si el equipo está bloqueado, solo lo muestra.
  */
-export type MdmMode = 'starting' | 'unpaired' | 'locked' | 'active';
+export type MdmMode = 'starting' | 'unpaired' | 'locked' | 'restricted' | 'active';
 export type MdmLockKind = 'manual' | 'payment' | 'clock' | 'offline';
+/** Restringido: el menú y la red funcionan, las apps no (ver "Estados del equipo" en la doc). */
+export type MdmRestrictKind = 'manual' | 'payment';
 
 export interface MdmApp {
   id: string;
@@ -14,6 +16,18 @@ export interface MdmApp {
   launch_url: string | null;
   /** La empresa habilitó pasarle al servicio la atestación del equipo (JWT). */
   pass_attestation: boolean;
+  /** En modo restringido las apps se muestran, pero no se pueden abrir. */
+  disabled: boolean;
+}
+
+/** Datos para que el usuario pague (los define el ISP en el panel). */
+export interface MdmPayment {
+  /** Fecha de vencimiento (YYYY-MM-DD). */
+  due: string | null;
+  phone: string | null;
+  /** https: se muestra como QR para abrir en el celular. */
+  url: string | null;
+  message: string | null;
 }
 
 export interface MdmWifiNetwork {
@@ -56,6 +70,10 @@ export interface MdmState {
   companyName: string | null;
   deviceName: string | null;
   lockKind: MdmLockKind | null;
+  restrictKind: MdmRestrictKind | null;
+  /** Aviso de pago próximo a vencer (banner fijo en el home). */
+  serviceWarning: boolean;
+  payment: MdmPayment | null;
   lockMessage: string | null;
   lockReason: string | null;
   paymentDue: string | null;
@@ -80,8 +98,11 @@ const STALE_MS = 15000;
  * sigue ahí con el último estado: pasado este margen se lo ignora (falla cerrado).
  */
 const AGENT_DEAD_MS = 120000;
-const MODES: readonly MdmMode[] = ['starting', 'unpaired', 'locked', 'active'];
+const MODES: readonly MdmMode[] = ['starting', 'unpaired', 'locked', 'restricted', 'active'];
 const LOCK_KINDS: readonly MdmLockKind[] = ['manual', 'payment', 'clock', 'offline'];
+const RESTRICT_KINDS: readonly MdmRestrictKind[] = ['manual', 'payment'];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const PHONE_RE = /^[0-9 +()-]{5,32}$/;
 const UNLOCK_RESULTS: readonly MdmUnlockResult[] = ['ok', 'invalid', 'rate_limited', 'unavailable'];
 const UPDATE_STATES: readonly MdmUpdateState[] = ['downloading', 'verifying', 'installing', 'failed'];
 const MAX_SCAN = 40;
@@ -95,6 +116,9 @@ const STARTING: MdmState = {
   companyName: null,
   deviceName: null,
   lockKind: null,
+  restrictKind: null,
+  serviceWarning: false,
+  payment: null,
   lockMessage: null,
   lockReason: null,
   paymentDue: null,
@@ -169,12 +193,38 @@ function parseUpdate(v: unknown): MdmUpdate | null {
   return { state, version: str(o.version, 32) };
 }
 
+function httpsUrl(v: unknown, max = 300): string | null {
+  const raw = str(v, max + 1);
+  if (!raw || raw.length > max) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePayment(v: unknown): MdmPayment | null {
+  const o = obj(v);
+  if (!o) return null;
+  const due = str(o.due, 10);
+  const phone = str(o.phone, 32);
+  return {
+    due: due && DATE_RE.test(due) ? due : null,
+    phone: phone && PHONE_RE.test(phone) ? phone : null,
+    url: httpsUrl(o.url),
+    message: str(o.message),
+  };
+}
+
 function parseApp(v: unknown): MdmApp | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
   const id = str(o.id, 41);
   const name = str(o.name, 60);
   if (!id || !name || (o.kind !== 'web' && o.kind !== 'internal')) return null;
+  // Deshabilitada (modo restringido): sin URL, nunca se abre.
+  if (o.disabled === true) return { id, name, kind: o.kind, launch_url: null, pass_attestation: false, disabled: true };
   let launchUrl: string | null = null;
   if (o.kind === 'web') {
     try {
@@ -185,7 +235,7 @@ function parseApp(v: unknown): MdmApp | null {
       return null;
     }
   }
-  return { id, name, kind: o.kind, launch_url: launchUrl, pass_attestation: o.pass_attestation === true };
+  return { id, name, kind: o.kind, launch_url: launchUrl, pass_attestation: o.pass_attestation === true, disabled: false };
 }
 
 /**
@@ -207,13 +257,20 @@ export function parseAgentState(raw: unknown, now = Date.now()): MdmState {
     companyName: str(o.company_name, 80),
     deviceName: str(o.device_name, 80),
     lockKind,
+    restrictKind: mode === 'restricted' ? (RESTRICT_KINDS.find((k) => k === o.restrict_kind) ?? 'manual') : null,
+    serviceWarning: mode === 'active' && o.service_warning === true,
+    payment: parsePayment(o.payment),
     lockMessage: str(o.lock_message),
     lockReason: str(o.lock_reason),
     paymentDue: str(o.payment_due, 10),
     pairingCode: str(o.pairing_code, 8),
     pairingExpiresAt: str(o.pairing_expires_at, 40),
     apps: Array.isArray(o.apps)
-      ? o.apps.map(parseApp).filter((a): a is MdmApp => a !== null)
+      ? o.apps
+          .map(parseApp)
+          .filter((a): a is MdmApp => a !== null)
+          // Fuera del modo activo ninguna app se puede abrir, diga lo que diga el archivo.
+          .map((a) => (mode === 'active' ? a : { ...a, launch_url: null, pass_attestation: false, disabled: true }))
       : [],
     wifi: parseWifi(o.wifi),
     unlock: parseUnlock(o.unlock),
