@@ -1,6 +1,18 @@
 import { useRef, useState } from 'react';
-import { ImagePlus, Lock, Trash2 } from 'lucide-react';
-import { db, LOGO_BUCKET, LOGO_MAX_BYTES, LOGO_TYPES, logoUrl, run, sniffImageType, type Company } from '../api';
+import { ImagePlus, Lock, Phone, QrCode, Trash2 } from 'lucide-react';
+import {
+  db,
+  LOGO_BUCKET,
+  LOGO_MAX_BYTES,
+  LOGO_TYPES,
+  logoUrl,
+  PAYMENT_PHONE_RE,
+  PAYMENT_URL_MAX,
+  PAYMENT_URL_RE,
+  run,
+  sniffImageType,
+  type Company,
+} from '../api';
 import { useToast } from '../toast';
 import { Button, Card, Chip, ErrorText, Field, inputClass, PageHeader } from '../ui';
 
@@ -37,6 +49,20 @@ function TvPreview({ company, logo, mode }: { company: Company & { lock_message:
               <div className="line-clamp-3 max-w-[85%] text-[11px] leading-relaxed text-white/75">
                 {mode === 'payment' ? company.payment_message : company.lock_message}
               </div>
+              {(company.payment_phone || company.payment_url) && (
+                <div className="flex items-center gap-3 text-[10px] text-white/70">
+                  {company.payment_url && (
+                    <span className="flex h-9 w-9 items-center justify-center rounded bg-white text-zinc-900" title={company.payment_url}>
+                      <QrCode className="h-6 w-6" aria-hidden />
+                    </span>
+                  )}
+                  {company.payment_phone && (
+                    <span className="flex items-center gap-1">
+                      <Phone className="h-3 w-3" aria-hidden /> {company.payment_phone}
+                    </span>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -56,6 +82,10 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
     payment_grace_days: company.payment_grace_days,
     payment_warning_days: company.payment_warning_days,
     timezone: company.timezone,
+    // v9. '' = sin etapa restringida / sin dato.
+    payment_restrict_days: company.payment_restrict_days == null ? '' : String(company.payment_restrict_days),
+    payment_phone: company.payment_phone ?? '',
+    payment_url: company.payment_url ?? '',
   });
   const [logoPath, setLogoPath] = useState(company.logo_path);
   const [preview, setPreview] = useState<Preview>('manual');
@@ -79,9 +109,21 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
         p_payment_grace_days: form.payment_grace_days,
         p_payment_warning_days: form.payment_warning_days,
         p_timezone: form.timezone,
+        // -1 = sin etapa restringida; '' en teléfono/URL los borra.
+        p_payment_restrict_days: form.payment_restrict_days === '' ? -1 : Number(form.payment_restrict_days),
+        p_payment_phone: form.payment_phone.trim(),
+        p_payment_url: form.payment_url.trim(),
       }),
     );
   };
+
+  const restrictDays = form.payment_restrict_days === '' ? null : Number(form.payment_restrict_days);
+  const restrictInvalid = restrictDays !== null && !(Number.isInteger(restrictDays) && restrictDays >= 0 && restrictDays <= 30);
+  const restrictActive = restrictDays !== null && !restrictInvalid && restrictDays < form.payment_grace_days;
+  const phoneInvalid = form.payment_phone.trim() !== '' && !PAYMENT_PHONE_RE.test(form.payment_phone.trim());
+  const urlInvalid =
+    form.payment_url.trim() !== '' && (form.payment_url.trim().length > PAYMENT_URL_MAX || !PAYMENT_URL_RE.test(form.payment_url.trim()));
+  const invalid = restrictInvalid || phoneInvalid || urlInvalid;
 
   const guard = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -128,14 +170,20 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
     });
 
   const logo = logoUrl(logoPath) || null;
-  const live = { ...company, ...form };
+  const live = {
+    ...company,
+    ...form,
+    payment_restrict_days: restrictDays,
+    payment_phone: form.payment_phone.trim() || null,
+    payment_url: form.payment_url.trim() || null,
+  };
 
   return (
     <>
       <PageHeader
         title="Marca y cobro"
         subtitle="Cómo ven el TV tus clientes y cuándo se bloquea por falta de pago"
-        actions={<Button disabled={busy || !dirty} onClick={save}>{dirty ? 'Guardar cambios' : 'Guardado'}</Button>}
+        actions={<Button disabled={busy || !dirty || invalid} onClick={save}>{dirty ? 'Guardar cambios' : 'Guardado'}</Button>}
       />
       <ErrorText error={error} />
       <div className="grid gap-6 xl:grid-cols-5">
@@ -175,6 +223,12 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
               <span className="h-px w-6 shrink-0 bg-white/15" />
               <span className="whitespace-nowrap rounded-full bg-white/[0.06] px-3 py-1 text-zinc-300">Vence el pago</span>
               <span className="h-px w-6 shrink-0 bg-white/15" />
+              {restrictActive && (
+                <>
+                  <span className="whitespace-nowrap rounded-full bg-amber-500/10 px-3 py-1 text-amber-300">Restringido a los {restrictDays} días</span>
+                  <span className="h-px w-6 shrink-0 bg-white/15" />
+                </>
+              )}
               <span className="whitespace-nowrap rounded-full bg-white/[0.06] px-3 py-1 text-zinc-300">{form.payment_grace_days} días de gracia</span>
               <span className="h-px w-6 shrink-0 bg-white/15" />
               <span className="whitespace-nowrap rounded-full bg-rose-500/10 px-3 py-1 text-rose-300">Bloqueo automático</span>
@@ -188,12 +242,46 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
                 <input type="number" min={0} max={30} className={inputClass} value={form.payment_grace_days}
                   onChange={(e) => set('payment_grace_days', Number(e.target.value))} />
               </Field>
+              <Field
+                label="Restringir tras (días)"
+                hint={
+                  restrictInvalid ? (
+                    <span className="text-rose-300">Entre 0 y 30, o vacío.</span>
+                  ) : restrictDays !== null && !restrictActive ? (
+                    <span className="text-amber-300">Sin efecto: tiene que ser menor que los días de gracia.</span>
+                  ) : (
+                    'Tras el vencimiento: apps deshabilitadas, menú y red sí. Vacío = sin esta etapa.'
+                  )
+                }
+              >
+                <input type="number" min={0} max={30} className={inputClass} placeholder="Sin etapa" value={form.payment_restrict_days}
+                  onFocus={() => setPreview('payment')} onChange={(e) => set('payment_restrict_days', e.target.value)} />
+              </Field>
               <Field label="Bloquear tras N días sin internet" hint="Evita que desconecten el equipo para esquivar un bloqueo.">
                 <input type="number" min={1} max={90} className={inputClass} value={form.offline_lock_days}
                   onChange={(e) => set('offline_lock_days', Number(e.target.value))} />
               </Field>
               <Field label="Zona horaria" hint="Define a qué hora vence el día de pago.">
                 <input className={inputClass} value={form.timezone} onChange={(e) => set('timezone', e.target.value)} />
+              </Field>
+            </div>
+          </Card>
+
+          <Card title="Datos de pago en el TV" description="Se muestran en el aviso, en la restricción y en el bloqueo por pago o manual.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Teléfono de pago"
+                hint={phoneInvalid ? <span className="text-rose-300">5 a 32 caracteres: números, espacios, + ( ) -</span> : 'Opcional.'}
+              >
+                <input type="tel" className={inputClass} maxLength={32} placeholder="0800-555-1234" value={form.payment_phone}
+                  onFocus={() => setPreview('payment')} onChange={(e) => set('payment_phone', e.target.value)} />
+              </Field>
+              <Field
+                label="URL de pago"
+                hint={urlInvalid ? <span className="text-rose-300">https://, hasta 300 caracteres, sin espacios ni comillas</span> : 'Opcional. El TV la muestra como QR.'}
+              >
+                <input type="url" className={inputClass} maxLength={PAYMENT_URL_MAX} placeholder="https://pagos.tu-isp.com" value={form.payment_url}
+                  onFocus={() => setPreview('payment')} onChange={(e) => set('payment_url', e.target.value)} />
               </Field>
             </div>
           </Card>

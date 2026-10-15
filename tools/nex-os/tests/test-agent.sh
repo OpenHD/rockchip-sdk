@@ -166,8 +166,10 @@ rm -f "$OVERRIDE_FILE"
 FAKE_NOW=$((NOW + 5 * 86400)); run_cycle
 check "vencido: bloqueado por pago" '[ "$MODE" = locked ] && [ "$LOCK_KIND" = payment ]'
 FAKE_NOW=$NOW
-RESP=$(make_resp '.restricted = true | .restrict_reason = "Mora"'); sync_remote; run_cycle
+RESP=$(make_resp '.restricted = true | .restrict_reason = "Mora" | .company.payment_phone = "0800-555"'); sync_remote; run_cycle
 check "restringido manual" '[ "$MODE" = restricted ] && [ "$RESTRICT_KIND" = manual ] && [ "$REASON" = Mora ]'
+publish_ui_state
+check "sin control de pago: teléfono de la empresa" 'jq -e ".payment.phone == \"0800-555\"" "$PUBLIC_DIR/ui-state.json" >/dev/null'
 RESP=$(make_resp '.payment = {paid_until: "2026-09-30", warn_at: 0, restrict_at: "basura", lock_at: 0, message: "x"}'); sync_remote; run_cycle
 check "restrict_at corrupto restringe (falla cerrado)" '[ "$MODE" = restricted ]'
 RESP=$(make_resp '.'); sync_remote; run_cycle

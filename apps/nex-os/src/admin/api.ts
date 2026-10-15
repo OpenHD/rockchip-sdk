@@ -11,6 +11,11 @@ export interface Company {
   payment_grace_days: number;
   payment_warning_days: number;
   payment_message: string;
+  /** v9: días después del vencimiento para pasar a "restringido". null = sin etapa (o sin efecto si >= gracia). */
+  payment_restrict_days: number | null;
+  /** v9: datos de pago que se muestran en el TV (la URL como QR). */
+  payment_phone: string | null;
+  payment_url: string | null;
   alert_telegram_chat_id: string | null;
   alert_emails: string[];
   alert_offline_hours: number;
@@ -59,7 +64,7 @@ export const EVENT_LABELS: Record<string, string> = {
 };
 
 export const DEVICE_COLUMNS =
-  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref' as const;
+  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref, restricted, restrict_reason' as const;
 
 export interface Device {
   id: string;
@@ -78,10 +83,32 @@ export interface Device {
   offline_alerted_at: string | null;
   /** N.º de cliente del ISP (único por empresa). */
   external_ref: string | null;
+  /** v9: restricción manual (menú y red sí, apps no). */
+  restricted: boolean;
+  restrict_reason: string | null;
 }
 
 /** Mismo formato que valida la base (mdm_devices.external_ref). */
 export const EXTERNAL_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}$/;
+/** Mismos formatos que valida mdm_update_company (v9). */
+export const PAYMENT_PHONE_RE = /^[0-9 +()-]{5,32}$/;
+export const PAYMENT_URL_RE = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#][A-Za-z0-9._~%/+=&?#:@,;!*-]*)?$/;
+export const PAYMENT_URL_MAX = 300;
+
+/** Estado de servicio (v9), mismo cálculo que el servidor (service_state de la API del ISP). */
+export type ServiceState = 'active' | 'warning' | 'restricted' | 'locked';
+
+export const STATE_LOG_COLUMNS = 'id, device_id, state, source, details, at' as const;
+
+/** Fila de mdm_device_state_log: cada cambio de estado (panel, API del ISP o lo que informó el equipo). */
+export interface StateLogEntry {
+  id: number;
+  device_id: string;
+  state: ServiceState;
+  source: 'panel' | 'api' | 'device';
+  details: Record<string, unknown>;
+  at: string;
+}
 
 /** El equipo considera "online" si sincronizó en los últimos 5 minutos (sync cada 60 s). */
 export function isOnline(d: Device): boolean {
@@ -94,9 +121,9 @@ export type Enforcement = 'confirmado' | 'pendiente' | 'sin datos';
 export function enforcement(d: Device, c: Company): Enforcement {
   if (!d.reported_mode) return 'sin datos';
   const status = deviceStatus(d, c);
-  const shouldLock = status === 'bloqueado' || status === 'pago vencido';
-  const isLocked = d.reported_mode === 'locked';
-  return shouldLock === isLocked ? 'confirmado' : 'pendiente';
+  const expected = status === 'bloqueado' || status === 'pago vencido' ? 'locked' : status === 'restringido' ? 'restricted' : 'active';
+  const actual = d.reported_mode === 'locked' ? 'locked' : d.reported_mode === 'restricted' ? 'restricted' : 'active';
+  return expected === actual ? 'confirmado' : 'pendiente';
 }
 
 export interface CatalogApp {
@@ -214,16 +241,32 @@ export async function sniffImageType(file: File): Promise<string | null> {
   return null;
 }
 
-export type DeviceStatus = 'activo' | 'bloqueado' | 'pago vencido' | 'por vencer' | 'sin conexión';
+export type DeviceStatus = 'activo' | 'bloqueado' | 'pago vencido' | 'restringido' | 'por vencer' | 'sin conexión';
+
+/** Día (inclusive) en que el equipo pasa a restringido por pago, o null si la empresa no usa esa etapa. */
+export function restrictDay(d: Device, c: Company): string | null {
+  if (!d.paid_until || c.payment_restrict_days == null || c.payment_restrict_days >= c.payment_grace_days) return null;
+  return addDays(d.paid_until, 1 + c.payment_restrict_days);
+}
+
+/** Mismo orden que el servidor: bloqueo manual > pago vencido > restringido manual > restringido por pago > aviso. */
+export function serviceState(d: Device, c: Company): ServiceState {
+  if (d.locked) return 'locked';
+  if (!d.paid_until) return d.restricted ? 'restricted' : 'active';
+  const today = new Date().toISOString().slice(0, 10);
+  if (today >= addDays(d.paid_until, 1 + c.payment_grace_days)) return 'locked';
+  const rDay = restrictDay(d, c);
+  if (d.restricted || (rDay && today >= rDay)) return 'restricted';
+  if (today >= addDays(d.paid_until, 1 - c.payment_warning_days)) return 'warning';
+  return 'active';
+}
 
 export function deviceStatus(d: Device, c: Company): DeviceStatus {
+  const state = serviceState(d, c);
   if (d.locked) return 'bloqueado';
-  if (d.paid_until) {
-    const today = new Date().toISOString().slice(0, 10);
-    const lockDay = addDays(d.paid_until, 1 + c.payment_grace_days);
-    if (today >= lockDay) return 'pago vencido';
-    if (today >= addDays(d.paid_until, 1 - c.payment_warning_days)) return 'por vencer';
-  }
+  if (state === 'locked') return 'pago vencido';
+  if (state === 'restricted') return 'restringido';
+  if (state === 'warning') return 'por vencer';
   if (d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() > c.offline_lock_days * 86_400_000) {
     return 'sin conexión';
   }

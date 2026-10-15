@@ -433,8 +433,8 @@ publish_ui_state() {
 			restrict_kind: (if $rkind == "" then null else $rkind end),
 			service_warning: ($warn == 1),
 			payment: (if $warn == 1 or $mode == "restricted" or ($mode == "locked" and ($kind == "payment" or $kind == "manual"))
-				then {due: ($c.payment.paid_until // null), phone: ($c.payment.phone // null),
-				      url: ($c.payment.url // null), message: ($c.payment.message // null)}
+				then {due: ($c.payment.paid_until // null), phone: ($c.payment.phone // $c.company.payment_phone // null),
+				      url: ($c.payment.url // $c.company.payment_url // null), message: ($c.payment.message // null)}
 				else null end),
 			lock_reason: (if $reason == "" then null else $reason end),
 			payment_due: (if $warn == 1 then $c.payment.paid_until else null end),

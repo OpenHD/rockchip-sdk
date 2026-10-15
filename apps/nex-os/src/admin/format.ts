@@ -62,10 +62,13 @@ export function appGradient(id: string): string {
 }
 
 export const LOCK_REASONS = ['Falta de pago', 'Baja del servicio', 'Equipo robado o extraviado', 'Uso indebido'];
+export const RESTRICT_REASONS = ['Falta de pago', 'Pago parcial', 'Uso indebido'];
 
 export const AUDIT_LABELS: Record<string, string> = {
   'device.lock': 'Bloqueó un equipo',
   'device.unlock': 'Desbloqueó un equipo',
+  'device.restrict': 'Restringió un equipo',
+  'device.unrestrict': 'Quitó la restricción de un equipo',
   'device.claim': 'Vinculó un equipo',
   'device.rename': 'Renombró un equipo',
   'device.unpair': 'Desvinculó un equipo',

@@ -592,3 +592,88 @@ Todo lo anterior se probó en una Mac, no en el equipo. Antes de producción hay
 - que exista `update ota` del recovery de Rockchip y que funcione con `update.img`;
 - el montaje de las políticas en tmpfs;
 - el script se probó con bash, no con ash de busybox: falta confirmar en el equipo el HMAC con `printf` octal.
+
+## v9: estados escalonados y rotación de claves (servidor y panel)
+
+Archivos: `supabase/schema-mdm-v9.sql` (después de v8, idempotente), `supabase/functions/isp-api`, `src/admin`,
+`supabase/tests/`.
+
+### Configurar las etapas
+
+En el panel, **Marca y cobro**:
+
+| Campo | Columna | Efecto |
+|---|---|---|
+| Aviso previo (días) | `payment_warning_days` | Banner en el TV desde N días antes del vencimiento |
+| Restringir tras (días) | `payment_restrict_days` | N días después del vencimiento: apps deshabilitadas; menú, pago y red sí. Vacío = sin etapa |
+| Días de gracia | `payment_grace_days` | Después de la gracia, bloqueo completo |
+| Teléfono de pago | `payment_phone` | `^[0-9 +()-]{5,32}$` |
+| URL de pago | `payment_url` | `https://`, hasta 300 caracteres; el TV la muestra como QR |
+
+- Ejemplo: aviso 5, restringir 3 y gracia 10 → aviso 5 días antes, restringido el día 3 y bloqueado el día 10.
+- La etapa restringida solo tiene efecto si es menor que la gracia. Si no, `restrict_at` va en `null`.
+- Por RPC: `mdm_update_company(..., p_payment_restrict_days, p_payment_phone, p_payment_url)`. En días, `-1` quita la
+  etapa. En teléfono y URL, `''` borra el dato. `null` deja el valor como estaba, así que las llamadas viejas siguen
+  andando.
+- **Restricción manual.** Se aplica desde el detalle del equipo (Restringir / Quitar restricción, con motivo),
+  con `mdm_set_device_restricted(p_device, p_restricted, p_reason)` o con la API. Se audita como
+  `device.restrict` / `device.unrestrict`.
+- **Sync.** Suma `restricted`, `restrict_reason`, `payment.restrict_at` (epoch o `null`), `payment.phone` y
+  `payment.url`. El teléfono y la URL también van en `company.payment_phone`/`payment_url`, para equipos sin control
+  de pago. Un equipo restringido, a mano o por pago, no recibe atestación.
+- **Historial.** `mdm_device_state_log` guarda cada cambio de bloqueo, restricción o `paid_until`, hecho desde el panel
+  o la API, y cada estado nuevo que informa el equipo. Lo leen los miembros de la empresa y aparece en el detalle del
+  equipo. Se purga al año (`mdm_purge_old_events`).
+
+### API: restringir
+
+`POST /devices/<id>/restrict` con `{"restricted": true|false, "reason"?: "…"}` devuelve el equipo. El equipo ahora
+incluye `restricted`, `restrict_reason` y `service_state`, que vale `locked`, `restricted`, `warning` o `active`. El
+servidor lo calcula con los mismos tiempos que el TV, salvo el reloj y los días offline, que solo conoce el equipo.
+
+```sh
+curl -s -X POST "$API/devices/ref:ABO-1234/restrict" -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"restricted":true,"reason":"Falta de pago"}'
+curl -s -X POST "$API/devices/ref:ABO-1234/restrict" -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"restricted":false}'
+```
+
+### Rotar la clave de firma MDM
+
+`/jwks` publica la clave actual (`NEX_SIGNING_KEY`) y las públicas de `NEX_SIGNING_PUBLIC_KEYS_EXTRA`: una o varias PEM
+`BEGIN PUBLIC KEY` concatenadas. El `kid` de cada una son los primeros 16 hex de `sha256(SPKI DER)`. Las inválidas o
+menores a 3072 bits se omiten y quedan en el log. `mdm-sync` firma siempre con `NEX_SIGNING_KEY`.
+
+1. **Clave nueva.** Generá el par con `tools/nex-os/keys/gen-mdm-sign-key.sh /ruta/nueva`.
+2. **Imágenes con las dos públicas.** Compilá con `NEX_MDM_SIGN_PUBKEY=/ruta/actual.pub.pem:/ruta/nueva.pub.pem` y
+   llevá esa imagen a todos los equipos (OTA). El equipo acepta cualquier PEM de `/etc/nex-agent/mdm-sign.d/`.
+   Lo ideal es tener siempre una de reserva incluida desde el primer build.
+   - Un equipo sin la pública nueva rechaza la configuración a partir del paso 3.
+   - Ese equipo sigue con la última configuración válida hasta llegar al límite de días offline.
+3. **Cambio, en un solo comando**, para que `/jwks` nunca quede sin la clave vieja:
+   ```sh
+   supabase secrets set NEX_SIGNING_KEY="$(cat /ruta/nueva/mdm-sign.key.pem)" \
+     NEX_SIGNING_PUBLIC_KEYS_EXTRA="$(cat /ruta/actual.pub.pem)"
+   ```
+4. **Limpieza.** Pasadas más de 6 h (la vida del JWT de atestación), sacá la vieja de
+   `NEX_SIGNING_PUBLIC_KEYS_EXTRA` y de los próximos builds.
+
+### Pruebas SQL
+
+```sh
+PG_BIN=/ruta/a/postgres/bin apps/nex-os/supabase/tests/run.sh   # o con psql/initdb en el PATH
+```
+
+- Requiere Postgres 15 o más nuevo, con pgcrypto.
+- Levanta un cluster descartable en un directorio temporal, solo con socket Unix.
+- Aplica `stubs.sql` (auth, storage y los privilegios por defecto de Supabase), v6 y v7, después `seed.sql`, v8 dos
+  veces y v9 dos veces.
+- Corre `tests.sql` e imprime `PASS`/`FAIL` y un resumen. Si algo falla, sale con un código distinto de 0.
+- Resultado actual: 148 pruebas (78 de v8 y 70 de v9), todas pasan.
+- Cubren:
+  - permisos de restricción: otra empresa, aal1 y anon;
+  - los campos nuevos del sync y la atestación con restricción;
+  - el historial escrito desde el panel, la API y el equipo;
+  - las validaciones de `mdm_update_company`;
+  - `mdm_isp_set_restricted` y `service_state`;
+  - la RLS del historial.

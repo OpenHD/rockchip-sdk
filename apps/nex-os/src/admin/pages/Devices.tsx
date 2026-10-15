@@ -1,6 +1,7 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Activity,
+  Ban,
   CalendarPlus,
   CircleCheck,
   Copy,
@@ -28,14 +29,19 @@ import {
   EVENT_LABELS,
   EXTERNAL_REF_RE,
   isOnline,
+  restrictDay,
   run,
+  serviceState,
+  STATE_LOG_COLUMNS,
   type Company,
   type Device,
   type DeviceEvent,
+  type ServiceState,
+  type StateLogEntry,
   type UnlockCode,
 } from '../api';
-import { FILTERS, healthIssues, paymentText, STATUS_META, type Filter } from '../deviceMeta';
-import { addMonths, copyText, formatDate, formatUptime, LOCK_REASONS, relativeTime, todayIso } from '../format';
+import { FILTERS, healthIssues, paymentText, SERVICE_STAGES, STATE_SOURCE_LABELS, STATUS_META, type Filter } from '../deviceMeta';
+import { addMonths, copyText, formatDate, formatUptime, LOCK_REASONS, relativeTime, RESTRICT_REASONS, todayIso } from '../format';
 import { useToast } from '../toast';
 import {
   Badge,
@@ -62,6 +68,7 @@ import type { CompanyData } from '../useCompanyData';
 
 type Dialog =
   | { kind: 'lock'; device: Device }
+  | { kind: 'restrict'; device: Device }
   | { kind: 'payment'; device: Device }
   | { kind: 'rename'; device: Device }
   | { kind: 'unpair'; device: Device }
@@ -73,6 +80,9 @@ type Dialog =
 const rpcUnlockCode = (device: string) => run<UnlockCode>(db().rpc('mdm_unlock_code', { p_device: device }));
 const rpcSetExternalRef = (device: string, ref: string | null) =>
   run(db().rpc('mdm_set_external_ref', { p_device: device, p_ref: ref }));
+// RPC de v9.
+const rpcSetRestricted = (device: string, restricted: boolean, reason: string | null = null) =>
+  run(db().rpc('mdm_set_device_restricted', { p_device: device, p_restricted: restricted, p_reason: reason }));
 
 function useAction(onDone: () => void) {
   const toast = useToast();
@@ -140,6 +150,66 @@ function LockModal({ device, company, onClose, onDone }: { device: Device; compa
           {finalReason && <div className="mt-1 text-xs text-zinc-500">{finalReason}</div>}
         </div>
         <p className="text-xs text-zinc-500">El TV aplica el bloqueo en menos de un minuto y corta lo que se esté reproduciendo.</p>
+        <ErrorText error={error} />
+      </div>
+    </Modal>
+  );
+}
+
+function RestrictModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState(RESTRICT_REASONS[0]);
+  const [custom, setCustom] = useState('');
+  const { busy, error, exec } = useAction(onDone);
+  const finalReason = reason === 'Otro' ? custom.trim() : reason;
+  const submit = () =>
+    exec(
+      () => rpcSetRestricted(device.id, true, finalReason),
+      `Restricción enviada a "${device.name ?? 'equipo'}". Esperando confirmación del TV…`,
+    ).then((ok) => ok && onClose());
+
+  return (
+    <Modal
+      title="Restringir equipo"
+      description={device.name ?? device.id}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="danger" icon={Ban} disabled={busy || !finalReason} onClick={submit}>Restringir</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-zinc-300">
+          Paso intermedio antes del bloqueo: el menú, la pantalla de pago y la configuración de red siguen funcionando, pero
+          las apps quedan deshabilitadas.
+        </p>
+        <div>
+          <div className="mb-2 text-xs font-medium text-zinc-300">Motivo</div>
+          <div className="flex flex-wrap gap-2">
+            {[...RESTRICT_REASONS, 'Otro'].map((r) => (
+              <Chip key={r} active={reason === r} onClick={() => setReason(r)}>{r}</Chip>
+            ))}
+          </div>
+        </div>
+        {reason === 'Otro' && (
+          <Field label="Describí el motivo">
+            <input autoFocus className={inputClass} maxLength={280} value={custom} onChange={(e) => setCustom(e.target.value)} />
+          </Field>
+        )}
+        <div className="rounded-xl border border-white/[0.07] bg-black/30 p-4">
+          <div className="mb-2 text-[11px] uppercase tracking-wider text-zinc-500">Así lo verá el cliente en el TV</div>
+          <div className="text-sm font-medium text-white">Apps deshabilitadas</div>
+          <div className="mt-1 text-sm text-zinc-300">{company.payment_message}</div>
+          {finalReason && <div className="mt-1 text-xs text-zinc-500">{finalReason}</div>}
+          {(company.payment_phone || company.payment_url) && (
+            <div className="mt-2 text-xs text-zinc-400">
+              {company.payment_phone && <span>Tel. {company.payment_phone}</span>}
+              {company.payment_phone && company.payment_url && ' · '}
+              {company.payment_url && <span>QR de pago</span>}
+            </div>
+          )}
+        </div>
         <ErrorText error={error} />
       </div>
     </Modal>
@@ -407,6 +477,81 @@ function HealthRow({ ok, label, detail }: { ok: boolean | undefined; label: stri
   );
 }
 
+const STAGE_ACTIVE: Record<string, string> = {
+  success: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
+  warning: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
+  danger: 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
+};
+
+/** Activo → Aviso → Restringido → Bloqueado, con la etapa actual resaltada. */
+function ServiceStages({ state }: { state: ServiceState }) {
+  return (
+    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]" aria-label="Estado del servicio">
+      {SERVICE_STAGES.map((s, i) => (
+        <Fragment key={s.id}>
+          {i > 0 && <span className="h-px w-3 shrink-0 bg-white/15" />}
+          <span
+            aria-current={s.id === state ? 'step' : undefined}
+            className={`whitespace-nowrap rounded-full px-2.5 py-1 ring-1 ring-inset ${
+              s.id === state ? `${STAGE_ACTIVE[s.tone]} font-semibold` : 'bg-white/[0.03] text-zinc-500 ring-white/[0.06]'
+            }`}
+          >
+            {s.label}
+          </span>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+const STATE_DOT: Record<ServiceState, string> = {
+  active: 'bg-emerald-400',
+  warning: 'bg-amber-400',
+  restricted: 'bg-amber-500',
+  locked: 'bg-rose-400',
+};
+
+function stateChangeText(e: StateLogEntry): string {
+  const d = e.details;
+  switch (d.change) {
+    case 'lock':
+      return 'Bloqueo';
+    case 'unlock':
+      return 'Desbloqueo';
+    case 'restrict':
+      return 'Restricción';
+    case 'unrestrict':
+      return 'Restricción quitada';
+    case 'paid_until':
+      return typeof d.paid_until === 'string' ? `Pagado hasta ${formatDate(d.paid_until)}` : 'Control de pago desactivado';
+    default:
+      return e.source === 'device' ? 'Informado por el equipo' : 'Cambio de estado';
+  }
+}
+
+/** Historial de mdm_device_state_log del equipo. Se recarga cuando cambia algo que mueve el estado. */
+function useStateLog(deviceId: string, version: string) {
+  const [rows, setRows] = useState<StateLogEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    run<StateLogEntry[]>(
+      db().from('mdm_device_state_log').select(STATE_LOG_COLUMNS).eq('device_id', deviceId).order('at', { ascending: false }).limit(30),
+    ).then(
+      (r) => {
+        if (cancelled) return;
+        setRows(r);
+        setError(null);
+      },
+      (err: Error) => !cancelled && setError(err.message),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceId, version]);
+  return { rows, error };
+}
+
 function DeviceDrawer({
   device,
   company,
@@ -430,6 +575,19 @@ function DeviceDrawer({
   const pay = paymentText(device, company);
   const h = device.health ?? {};
   const history = events.filter((e) => e.device_id === device.id).slice(0, 30);
+  const state = serviceState(device, company);
+  const rDay = restrictDay(device, company);
+  const stateLog = useStateLog(device.id, [device.locked, device.restricted, device.paid_until, device.reported_mode].join('|'));
+
+  const unrestrict = async () => {
+    try {
+      await rpcSetRestricted(device.id, false);
+      toast.show('Restricción quitada. Esperando confirmación del TV…');
+      onChanged();
+    } catch (err) {
+      toast.show((err as Error).message, 'error');
+    }
+  };
 
   const unlock = async () => {
     try {
@@ -464,6 +622,7 @@ function DeviceDrawer({
           <Badge tone={meta.tone} icon={meta.icon}>{meta.label}</Badge>
           {applied === 'pendiente' && <Badge tone="warning" icon={Hourglass}>Pendiente de aplicar</Badge>}
           {applied === 'confirmado' && device.reported_mode === 'locked' && <Badge tone="success" icon={CircleCheck}>Bloqueo confirmado</Badge>}
+          {applied === 'confirmado' && device.reported_mode === 'restricted' && <Badge tone="success" icon={CircleCheck}>Restricción confirmada</Badge>}
           <span className="ml-auto flex items-center gap-2 text-xs text-zinc-400">
             <StatusDot online={online} /> {online ? 'En línea' : `Visto ${relativeTime(device.last_seen_at)}`}
           </span>
@@ -474,6 +633,19 @@ function DeviceDrawer({
             Motivo del bloqueo: {device.lock_reason}
           </div>
         )}
+        {device.restricted && (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-4 py-3 text-sm text-amber-200">
+            Restringido a mano{device.restrict_reason ? `: ${device.restrict_reason}` : ''}
+          </div>
+        )}
+
+        <section>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Estado del servicio</h3>
+          <ServiceStages state={state} />
+          {rDay && !device.locked && state !== 'locked' && (
+            <p className="mt-1.5 text-xs text-zinc-500">Si no paga, se restringe el {formatDate(rDay)}.</p>
+          )}
+        </section>
 
         <div className="grid grid-cols-2 gap-2">
           {device.locked ? (
@@ -482,12 +654,17 @@ function DeviceDrawer({
             <Button variant="danger" icon={Lock} onClick={() => onAction({ kind: 'lock', device })}>Bloquear</Button>
           )}
           <Button variant="secondary" icon={CreditCard} onClick={() => onAction({ kind: 'payment', device })}>Registrar pago</Button>
-          <Button variant="secondary" icon={KeyRound} disabled={codeBusy} onClick={unlockCode} className="col-span-2">
+          {device.restricted ? (
+            <Button variant="secondary" icon={CircleCheck} onClick={unrestrict}>Quitar restricción</Button>
+          ) : (
+            <Button variant="secondary" icon={Ban} onClick={() => onAction({ kind: 'restrict', device })}>Restringir</Button>
+          )}
+          <Button variant="secondary" icon={KeyRound} disabled={codeBusy} onClick={unlockCode}>
             Código de desbloqueo
           </Button>
         </div>
         <p className="-mt-4 text-xs text-zinc-500">
-          Para un equipo bloqueado sin internet: el cliente ingresa el código en el TV y se desbloquea por 72 h.
+          Para un equipo bloqueado o restringido sin internet: el cliente ingresa el código en el TV y queda activo por 72 h.
         </p>
 
         <section>
@@ -518,6 +695,33 @@ function DeviceDrawer({
             <HealthRow ok={undefined} label="Encendido hace" detail={formatUptime(h.uptime)} />
             <HealthRow ok={undefined} label="Espacio libre" detail={h.free_mb ? `${(h.free_mb / 1024).toFixed(1)} GB` : '—'} />
           </div>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Cambios de estado</h3>
+          <ErrorText error={stateLog.error} />
+          {!stateLog.rows ? (
+            !stateLog.error && <Skeleton className="h-10" />
+          ) : stateLog.rows.length === 0 ? (
+            <p className="text-sm text-zinc-500">Sin cambios registrados.</p>
+          ) : (
+            <ol className="relative ml-2 border-l border-white/10">
+              {stateLog.rows.map((e) => (
+                <li key={e.id} className="mb-3 ml-4">
+                  <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ${STATE_DOT[e.state] ?? 'bg-zinc-500'}`} />
+                  <div className="text-sm text-zinc-200">
+                    {SERVICE_STAGES.find((s) => s.id === e.state)?.label ?? e.state}
+                    <span className="text-zinc-500"> · {stateChangeText(e)}</span>
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {relativeTime(e.at)} · {STATE_SOURCE_LABELS[e.source] ?? e.source}
+                    {e.source === 'api' && typeof e.details.actor === 'string' && ` (${e.details.actor.replace(/^api:/, '')})`}
+                    {typeof e.details.reason === 'string' && ` · ${e.details.reason}`}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
 
         <section>
@@ -594,6 +798,16 @@ export default function DevicesPage({
     try {
       await run(db().rpc('mdm_set_device_lock', { p_device: d.id, p_locked: false }));
       toast.show(`Desbloqueo enviado a "${d.name ?? 'equipo'}"`);
+      data.reload();
+    } catch (err) {
+      toast.show((err as Error).message, 'error');
+    }
+  };
+
+  const quickUnrestrict = async (d: Device) => {
+    try {
+      await rpcSetRestricted(d.id, false);
+      toast.show(`Restricción quitada a "${d.name ?? 'equipo'}"`);
       data.reload();
     } catch (err) {
       toast.show((err as Error).message, 'error');
@@ -689,6 +903,9 @@ export default function DevicesPage({
                             trigger={(toggle) => <IconButton icon={EllipsisVertical} label="Más acciones" onClick={toggle} />}
                             items={[
                               { label: 'Ver detalle', icon: Activity, onClick: () => onSelect(d.id) },
+                              d.restricted
+                                ? { label: 'Quitar restricción', icon: CircleCheck, onClick: () => quickUnrestrict(d) }
+                                : { label: 'Restringir', icon: Ban, onClick: () => setDialog({ kind: 'restrict', device: d }) },
                               { label: 'Renombrar', icon: Pencil, onClick: () => setDialog({ kind: 'rename', device: d }) },
                               { label: 'Desvincular', icon: Unlink, danger: true, onClick: () => setDialog({ kind: 'unpair', device: d }) },
                             ]}
@@ -726,13 +943,14 @@ export default function DevicesPage({
 
       <p className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
         <HardDrive className="h-3.5 w-3.5" aria-hidden />
-        Los equipos sincronizan cada minuto. Un pago vencido bloquea el TV aunque no tenga internet.
+        Los equipos sincronizan cada minuto. Un pago vencido restringe o bloquea el TV aunque no tenga internet.
       </p>
 
       {selected && (
         <DeviceDrawer device={selected} company={company} events={data.events} onClose={() => onSelect(null)} onAction={setDialog} onChanged={data.reload} />
       )}
       {dialog?.kind === 'lock' && <LockModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
+      {dialog?.kind === 'restrict' && <RestrictModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
       {dialog?.kind === 'payment' && <PaymentModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
       {dialog?.kind === 'rename' && <RenameModal device={dialog.device} onClose={() => setDialog(null)} onDone={data.reload} />}
       {dialog?.kind === 'unpair' && (

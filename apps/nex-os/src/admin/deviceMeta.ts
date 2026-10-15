@@ -1,5 +1,5 @@
-import { CircleCheck, Clock, CreditCard, Lock, WifiOff, type LucideIcon } from 'lucide-react';
-import { deviceStatus, isOnline, type Company, type Device, type DeviceStatus } from './api';
+import { Ban, CircleCheck, Clock, CreditCard, Lock, WifiOff, type LucideIcon } from 'lucide-react';
+import { deviceStatus, isOnline, type Company, type Device, type DeviceStatus, type ServiceState } from './api';
 import { daysFromToday, formatDate } from './format';
 import type { Tone } from './ui';
 
@@ -8,8 +8,23 @@ export const STATUS_META: Record<DeviceStatus, { tone: Tone; icon: LucideIcon; l
   activo: { tone: 'success', icon: CircleCheck, label: 'Activo' },
   bloqueado: { tone: 'danger', icon: Lock, label: 'Bloqueado' },
   'pago vencido': { tone: 'danger', icon: CreditCard, label: 'Pago vencido' },
+  restringido: { tone: 'warning', icon: Ban, label: 'Restringido' },
   'por vencer': { tone: 'warning', icon: Clock, label: 'Pago por vencer' },
   'sin conexión': { tone: 'neutral', icon: WifiOff, label: 'Sin conexión' },
+};
+
+/** Etapas del servicio (v9), en orden de gravedad. */
+export const SERVICE_STAGES: { id: ServiceState; label: string; tone: Tone }[] = [
+  { id: 'active', label: 'Activo', tone: 'success' },
+  { id: 'warning', label: 'Aviso', tone: 'warning' },
+  { id: 'restricted', label: 'Restringido', tone: 'warning' },
+  { id: 'locked', label: 'Bloqueado', tone: 'danger' },
+];
+
+export const STATE_SOURCE_LABELS: Record<string, string> = {
+  panel: 'Panel',
+  api: 'API',
+  device: 'Equipo',
 };
 
 export function healthIssues(d: Device): string[] {
@@ -30,12 +45,13 @@ export function paymentText(d: Device, c: Company): { text: string; tone: string
   return { text: `Hasta ${formatDate(d.paid_until)}`, tone: 'text-zinc-300' };
 }
 
-export type Filter = 'todos' | 'online' | 'bloqueados' | 'vencidos' | 'por-vencer' | 'offline' | 'alertas';
+export type Filter = 'todos' | 'online' | 'bloqueados' | 'restringidos' | 'vencidos' | 'por-vencer' | 'offline' | 'alertas';
 
 export const FILTERS: { id: Filter; label: string; test: (d: Device, c: Company) => boolean }[] = [
   { id: 'todos', label: 'Todos', test: () => true },
   { id: 'online', label: 'En línea', test: (d) => isOnline(d) },
   { id: 'bloqueados', label: 'Bloqueados', test: (d, c) => ['bloqueado', 'pago vencido'].includes(deviceStatus(d, c)) },
+  { id: 'restringidos', label: 'Restringidos', test: (d, c) => deviceStatus(d, c) === 'restringido' },
   { id: 'vencidos', label: 'Pago vencido', test: (d, c) => deviceStatus(d, c) === 'pago vencido' },
   { id: 'por-vencer', label: 'Por vencer', test: (d, c) => deviceStatus(d, c) === 'por vencer' },
   { id: 'offline', label: 'Sin conexión', test: (d) => !isOnline(d) },

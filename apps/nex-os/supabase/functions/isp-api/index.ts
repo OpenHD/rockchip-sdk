@@ -1,6 +1,6 @@
 // NEX MDM — API para el sistema de cobranza del ISP (servidor a servidor).
 //
-//   GET  /jwks                                 público: clave para verificar el JWT de atestación
+//   GET  /jwks                                 público: claves para verificar el JWT de atestación
 //   GET  /devices?limit=&offset=&ref=          → {devices: [...], limit, offset}
 //   GET  /devices/<id>                         → equipo
 //   POST /devices/<id>/lock          {reason?}
@@ -8,10 +8,14 @@
 //   POST /devices/<id>/paid-until    {paid_until: "YYYY-MM-DD" | null}
 //   POST /devices/<id>/external-ref  {external_ref: string | null}
 //   POST /devices/<id>/unlock-code             → {code, valid_on, hours}
+//   POST /devices/<id>/restrict      {restricted: bool, reason?}   (v9)
 // <id> = uuid del equipo o ref:<external_ref>.
+// El equipo incluye (v9) restricted, restrict_reason y service_state ('locked'|'restricted'|'warning'|'active').
 // Auth: Authorization: Bearer nexk_<43 caracteres base64url>. En la base solo vive sha256(clave).
 //
-// Secretos: NEX_SIGNING_KEY (para /jwks). SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY los inyecta Supabase.
+// Secretos: NEX_SIGNING_KEY (para /jwks). Opcional: NEX_SIGNING_PUBLIC_KEYS_EXTRA, una o varias claves públicas PEM
+// ("BEGIN PUBLIC KEY", concatenadas) que /jwks también publica: la clave anterior durante una rotación.
+// SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY los inyecta Supabase.
 // La service role solo se usa para llamar a las funciones mdm_isp_*, que validan la clave y la empresa adentro.
 //
 // Deploy: supabase functions deploy isp-api --no-verify-jwt
@@ -59,14 +63,24 @@ function json(status: number, body: unknown, headers: Record<string, string> = {
 // JWKS (misma clave MDM que firma la configuración y la atestación)
 // ---------------------------------------------------------------------------
 
+function b64ToDer(body: string): ArrayBuffer {
+  const bin = atob(body.replace(/\s+/g, ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer as ArrayBuffer;
+}
+
 function pemToDer(pem: string, label: string): ArrayBuffer {
   const text = pem.replace(/\\n/g, '\n').trim();
   const m = text.match(new RegExp(`^-----BEGIN ${label}-----([A-Za-z0-9+/=\\s]+)-----END ${label}-----$`));
   if (!m) throw new Error(`NEX_SIGNING_KEY no es un PEM "${label}" (PKCS8)`);
-  const bin = atob(m[1].replace(/\s+/g, ''));
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out.buffer as ArrayBuffer;
+  return b64ToDer(m[1]);
+}
+
+/** Cuerpos base64 de todas las "BEGIN PUBLIC KEY" (SPKI) de un texto con una o varias PEM concatenadas. */
+function publicPemBodies(text: string): string[] {
+  const re = /-----BEGIN PUBLIC KEY-----([A-Za-z0-9+/=\s]+?)-----END PUBLIC KEY-----/g;
+  return [...text.replace(/\\n/g, '\n').matchAll(re)].map((m) => m[1]);
 }
 
 function toHex(buf: ArrayBuffer): string {
@@ -82,27 +96,53 @@ interface PublicJwk {
   kid: string;
 }
 
-async function loadJwk(pem: string): Promise<PublicJwk> {
-  const privateKey = await crypto.subtle.importKey('pkcs8', pemToDer(pem, 'PRIVATE KEY'), RSA_ALG, true, ['sign']);
-  const { modulusLength } = privateKey.algorithm as RsaHashedKeyAlgorithm;
-  if (modulusLength < 3072) throw new Error('NEX_SIGNING_KEY debe ser RSA de 3072 bits o más');
-  // Solo la parte pública (n, e): el resto del JWK privado se descarta acá.
-  const { n, e } = await crypto.subtle.exportKey('jwk', privateKey);
-  if (!n || !e) throw new Error('No se pudo derivar la clave pública');
-  const publicKey = await crypto.subtle.importKey('jwk', { kty: 'RSA', n, e, ext: true }, RSA_ALG, true, ['verify']);
+/** JWK público a partir de una clave pública SPKI. kid = primeros 16 hex de sha256(SPKI DER). */
+async function spkiToJwk(spki: ArrayBuffer): Promise<PublicJwk> {
+  const publicKey = await crypto.subtle.importKey('spki', spki, RSA_ALG, true, ['verify']);
+  const { modulusLength } = publicKey.algorithm as RsaHashedKeyAlgorithm;
+  if (modulusLength < 3072) throw new Error('La clave de firma debe ser RSA de 3072 bits o más');
+  const { n, e } = await crypto.subtle.exportKey('jwk', publicKey);
+  if (!n || !e) throw new Error('No se pudo leer la clave pública');
   const kid = toHex(await crypto.subtle.digest('SHA-256', await crypto.subtle.exportKey('spki', publicKey))).slice(0, 16);
   return { kty: 'RSA', n, e, alg: 'RS256', use: 'sig', kid };
 }
 
-let jwkPromise: Promise<PublicJwk> | null = null;
-function publicJwk(): Promise<PublicJwk> {
-  if (!jwkPromise) {
-    jwkPromise = loadJwk(env('NEX_SIGNING_KEY')).catch((err) => {
-      jwkPromise = null;
+async function loadJwk(pem: string): Promise<PublicJwk> {
+  const privateKey = await crypto.subtle.importKey('pkcs8', pemToDer(pem, 'PRIVATE KEY'), RSA_ALG, true, ['sign']);
+  // Solo la parte pública (n, e): el resto del JWK privado se descarta acá.
+  const { n, e } = await crypto.subtle.exportKey('jwk', privateKey);
+  if (!n || !e) throw new Error('No se pudo derivar la clave pública');
+  const publicKey = await crypto.subtle.importKey('jwk', { kty: 'RSA', n, e, ext: true }, RSA_ALG, true, ['verify']);
+  return spkiToJwk(await crypto.subtle.exportKey('spki', publicKey));
+}
+
+/** Clave actual (la que firma) primero; después las públicas extra de NEX_SIGNING_PUBLIC_KEYS_EXTRA, sin repetir kid.
+ *  Una extra inválida se omite (y se loguea) para no tirar abajo la verificación con la clave actual. */
+async function loadJwks(): Promise<PublicJwk[]> {
+  const keys = [await loadJwk(env('NEX_SIGNING_KEY'))];
+  const extra = Deno.env.get('NEX_SIGNING_PUBLIC_KEYS_EXTRA') ?? '';
+  const bodies = publicPemBodies(extra);
+  if (extra.trim() && !bodies.length) console.error('isp-api: NEX_SIGNING_PUBLIC_KEYS_EXTRA no tiene ninguna "BEGIN PUBLIC KEY"');
+  for (const body of bodies) {
+    try {
+      const jwk = await spkiToJwk(b64ToDer(body));
+      if (!keys.some((k) => k.kid === jwk.kid)) keys.push(jwk);
+    } catch (err) {
+      console.error('isp-api: clave extra ignorada:', (err as Error)?.message ?? 'inválida');
+    }
+  }
+  return keys;
+}
+
+let jwksPromise: Promise<PublicJwk[]> | null = null;
+function publicJwks(): Promise<PublicJwk[]> {
+  if (!jwksPromise) {
+    jwksPromise = loadJwks().catch((err) => {
+      jwksPromise = null;
       throw err;
     });
   }
-  return jwkPromise;
+  return jwksPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +283,7 @@ async function handle(req: Request): Promise<Response> {
 
   if (route.length === 1 && route[0] === 'jwks') {
     requireMethod(req, 'GET');
-    return json(200, { keys: [await publicJwk()] }, { 'Cache-Control': 'public, max-age=300' });
+    return json(200, { keys: await publicJwks() }, { 'Cache-Control': 'public, max-age=300' });
   }
   if (route[0] !== 'devices' || route.length > 3) throw new HttpError(404, 'Ruta inexistente');
 
@@ -307,6 +347,20 @@ async function handle(req: Request): Promise<Response> {
     case 'unlock-code': {
       await readBody(req, []);
       return json(200, await rpc('mdm_isp_unlock_code', { p_key_hash, p_id }));
+    }
+    case 'restrict': {
+      const body = await readBody(req, ['restricted', 'reason']);
+      if (typeof body.restricted !== 'boolean') throw new HttpError(400, 'Falta restricted (true o false)');
+      const reason = body.reason ?? null;
+      if (reason !== null && (typeof reason !== 'string' || reason.length > 280)) {
+        throw new HttpError(400, 'reason debe ser texto de hasta 280 caracteres');
+      }
+      return json(200, await rpc('mdm_isp_set_restricted', {
+        p_key_hash,
+        p_id,
+        p_restricted: body.restricted,
+        p_reason: body.restricted ? reason : null,
+      }));
     }
     default:
       throw new HttpError(404, 'Ruta inexistente');
