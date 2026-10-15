@@ -33,6 +33,12 @@ export const isMdmBuild = import.meta.env.VITE_NEX_MDM === '1';
 const STATE_URL = '/agent/ui-state.json';
 const POLL_MS = 3000;
 const STALE_MS = 15000;
+/**
+ * El agente reescribe el archivo en cada vuelta (cada ~5 s; una vuelta con
+ * sync lento puede tardar ~1 min). Si deja de hacerlo, el archivo en /run
+ * sigue ahí con el último estado: pasado este margen se lo ignora (falla cerrado).
+ */
+const AGENT_DEAD_MS = 120000;
 const MODES: readonly MdmMode[] = ['starting', 'unpaired', 'locked', 'active'];
 const LOCK_KINDS: readonly MdmLockKind[] = ['manual', 'payment', 'clock', 'offline'];
 
@@ -73,12 +79,16 @@ function parseApp(v: unknown): MdmApp | null {
   return { id, name, kind: o.kind, launch_url: launchUrl };
 }
 
-/** Valida todo lo que llega del archivo: ante cualquier duda, 'starting' (pantalla de espera). */
-export function parseAgentState(raw: unknown): MdmState {
+/**
+ * Valida todo lo que llega del archivo: ante cualquier duda, 'starting' (pantalla de espera).
+ * Un estado viejo (agente caído) también cuenta como duda.
+ */
+export function parseAgentState(raw: unknown, now = Date.now()): MdmState {
   if (!raw || typeof raw !== 'object') return STARTING;
   const o = raw as Record<string, unknown>;
   const mode = MODES.find((m) => m === o.mode);
   if (!mode) return STARTING;
+  if (typeof o.updated_at !== 'number' || now - o.updated_at * 1000 > AGENT_DEAD_MS) return STARTING;
   const logo = str(o.logo, 64);
   const lockKind = LOCK_KINDS.find((k) => k === o.lock_kind) ?? null;
   return {

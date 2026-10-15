@@ -39,7 +39,9 @@ EVENTS_FILE=$STATE_DIR/events.jsonl
 APPLIED_FILE=$STATE_DIR/applied_mode
 AGENT_VERSION=2
 LOGO_DIR=$STATE_DIR/branding
-POLICY_FILE=/etc/chromium/policies/managed/nex-mdm-urls.json
+# Directorio en tmpfs montado sobre /etc/chromium/policies/managed por S99nex-os:
+# en cada arranque se vuelve a la política fallo-cerrado de la imagen.
+POLICY_FILE=/run/nex-policies/nex-mdm-urls.json
 DNS_CONF=$RUN_DIR/dnsmasq.conf
 DNS_UPSTREAM=$RUN_DIR/resolv.upstream
 DNS_LOG=$RUN_DIR/dns.log
@@ -97,6 +99,22 @@ status_json() {
 		--argjson v "$AGENT_VERSION" \
 		'{mode: $mode, lock_kind: (if $kind == "" then null else $kind end), hardened: $hardened,
 		  dns_filter: $dns, firewall: $fw, uptime: $up, free_mb: $free, agent: $v}'
+}
+
+# Estos equipos no tienen RTC con batería: tras un corte de luz el reloj
+# arranca en 1970, HTTPS falla (certificados "todavía no válidos") y el equipo
+# quedaría bloqueado por reloj sin poder sincronizar. El reloj solo se adelanta,
+# nunca se atrasa, hasta la última hora conocida (del servidor o del último
+# sync); chrony corrige el resto.
+clock_guard() {
+	floor=0
+	for f in /etc/nex-os-build-epoch "$SERVER_EPOCH_FILE" "$LAST_SYNC_FILE"; do
+		v=$(cat "$f" 2>/dev/null)
+		case "$v" in '' | *[!0-9]*) continue ;; esac
+		[ "$v" -gt "$floor" ] && floor=$v
+	done
+	[ "$(now)" -lt "$floor" ] || return 0
+	date -u -s "@$floor" >/dev/null 2>&1 && log "reloj adelantado a la última hora conocida ($floor)"
 }
 
 ensure_token() {
@@ -171,6 +189,7 @@ sync_remote() {
 	now | write_atomic "$LAST_SYNC_FILE" 0600
 	ep=$(printf '%s' "$resp" | jq -r '.server_epoch // empty' 2>/dev/null)
 	case "$ep" in '' | *[!0-9]*) ;; *) echo "$ep" | write_atomic "$SERVER_EPOCH_FILE" 0600 ;; esac
+	clock_guard
 	return 0
 }
 
@@ -200,12 +219,9 @@ compute_mode() {
 			LOCK_KIND=payment
 			REASON=$(jq -r '.payment.message // ""' "$CONFIG_FILE")
 		elif [ "$(now)" -lt $((last - 300)) ]; then
-			MODE=locked
-			LOCK_KIND=clock
-			REASON="La hora del equipo es inválida. Conectalo a internet."
-		elif [ "$t" -lt $((last - 300)) ]; then
 			# El reloj volvió hacia atrás: posible intento de esquivar el límite offline.
 			MODE=locked
+			LOCK_KIND=clock
 			REASON="La hora del equipo es inválida. Conectalo a internet."
 		elif [ $((t - last)) -gt $((days * 86400)) ]; then
 			MODE=locked
@@ -333,7 +349,7 @@ apply_chromium_policy() {
 	fi
 	printf '%s\n' "$new" > "$RUN_DIR/policy.last"
 	[ "$current" = "$new" ] && return 1
-	mkdir -p "$(dirname "$POLICY_FILE")"
+	[ -d "${POLICY_FILE%/*}" ] || { add_event_once policy_unavailable '{}'; return 1; }
 	printf '%s\n' "$new" | write_atomic "$POLICY_FILE" 0644 || { log "no se pudo escribir la política"; return 1; }
 	log "política de Chromium actualizada ($(wc -l < "$RUN_DIR/allowed") dominios)"
 	return 0
@@ -479,6 +495,7 @@ main() {
 		add_event agent_started "$(jq -nc --arg fw "$FIRMWARE" '{firmware: $fw}')"
 	fi
 	touch "$RUN_DIR/started"
+	clock_guard
 	apply_firewall
 
 	while :; do

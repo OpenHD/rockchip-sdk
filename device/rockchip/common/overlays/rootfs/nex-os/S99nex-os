@@ -5,10 +5,26 @@
 # En imágenes endurecidas el kiosk no se puede desactivar.
 [ -e /etc/nex-os-hardened ] && RK_NEX_OS=1
 
+MANAGED=/etc/chromium/policies/managed
+RUN_POLICIES=/run/nex-policies
+
+# Las políticas que escribe nex-agent viven en tmpfs: en cada arranque se parte
+# de las de la imagen (fallo-cerrado). Si el montaje falla, Chromium usa las de
+# la imagen y el equipo queda en la lista mínima: falla cerrado igual.
+mount_policies() {
+	[ -x /usr/bin/nex-agent ] && [ -d "$MANAGED" ] || return 0
+	mountpoint -q "$MANAGED" && return 0
+	rm -rf "$RUN_POLICIES"
+	mkdir -p "$RUN_POLICIES" && chmod 0755 "$RUN_POLICIES" &&
+		cp -a "$MANAGED/." "$RUN_POLICIES/" &&
+		mount --bind "$RUN_POLICIES" "$MANAGED"
+}
+
 case "$1" in
 	start)
 		[ "${RK_NEX_OS:-1}" = 0 ] && exit 0
 		mkdir -p /run/nex-os
+		mount_policies
 		busybox httpd -f -p 127.0.0.1:8080 -h /opt/nex-os/www \
 			>/run/nex-os/httpd.log 2>&1 &
 		(

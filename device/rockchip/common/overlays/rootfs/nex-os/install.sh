@@ -43,6 +43,9 @@ install -D -m 0644 "$SOURCE_DIR/policies/nex-mdm-urls.json" "$POLICY_DIR/nex-mdm
 # La UI lee el estado público del agente en /agent/ (solo lectura, sin secretos).
 ln -sfn /run/nex-agent/public "$TARGET_DIR/opt/nex-os/www/agent"
 
+# Piso para el reloj sin RTC (ver clock_guard en nex-agent).
+date -u +%s > "$TARGET_DIR/etc/nex-os-build-epoch"
+
 git -C "$SOURCE_DIR" describe --always --dirty 2>/dev/null \
 	> "$TARGET_DIR/etc/nex-os-version" || echo unknown > "$TARGET_DIR/etc/nex-os-version"
 
