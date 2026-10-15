@@ -2,8 +2,12 @@
 # nex-agent: gestión remota del TV box (ver apps/nex-os/docs/GESTION_REMOTA.md).
 #
 # - Se autentica ante Supabase con un token de 256 bits que nunca sale de
-#   /var/lib/nex-agent (0700). El token viaja solo en el cuerpo HTTPS, nunca
+#   /userdata/nex-agent (0700). El token viaja solo en el cuerpo HTTPS, nunca
 #   en argumentos de procesos.
+# - La configuración del equipo viene firmada por el servidor (Edge Function
+#   mdm-sync) y atada al hardware: se verifica con la clave pública de la imagen
+#   en cada arranque. Editar /userdata a mano (o copiar la configuración de otro
+#   equipo) la invalida y el equipo vuelve a la pantalla de espera.
 # - Es la fuente de verdad del equipo: calcula el modo (vinculación, bloqueado,
 #   activo), aplica las políticas de Chromium y el filtro DNS, y publica un
 #   estado de solo lectura para la UI en /run/nex-agent/public.
@@ -27,17 +31,37 @@ FALLBACK_DNS=${NEX_AGENT_FALLBACK_DNS:-"1.1.1.1 9.9.9.9"}
 NTP_DOMAINS=${NEX_AGENT_NTP_DOMAINS:-"pool.ntp.org"}
 UI_ORIGIN=${NEX_AGENT_UI_ORIGIN:-"http://127.0.0.1:8080"}
 
-STATE_DIR=/var/lib/nex-agent
+OTA_CMD=${NEX_AGENT_OTA_CMD:-"update ota"}
+WIFI_IFACE=${NEX_AGENT_WIFI_IFACE:-wlan0}
+
+# El estado vive en userdata: el sistema puede ser de solo lectura (dm-verity).
+# Un reset de fábrica lo borra; el equipo se re-enrola solo por hardware_id.
+STATE_DIR=/userdata/nex-agent
+OLD_STATE_DIR=/var/lib/nex-agent
 RUN_DIR=/run/nex-agent
 PUBLIC_DIR=$RUN_DIR/public
+# Pedidos de la UI (CGI /cgi-bin/nex, usuario nex-www): solo escritura para ese grupo.
+INBOX_DIR=$RUN_DIR/inbox
+WWW_GROUP=nex-www
 TOKEN_FILE=$STATE_DIR/token
-CONFIG_FILE=$STATE_DIR/config.json
+SIGNED_PAYLOAD=$STATE_DIR/config.payload
+SIGNED_SIG=$STATE_DIR/config.sig
+# Copia verificada de la configuración firmada (tmpfs, solo root).
+CONFIG_FILE=$RUN_DIR/config.json
+OVERRIDE_FILE=$STATE_DIR/unlock_override
+UNLOCK_FAILS=$STATE_DIR/unlock_fails
+UNLOCK_RESULT=$RUN_DIR/unlock_result
+UPDATE_DIR=$STATE_DIR/update
+WIFI_SCAN=$RUN_DIR/wifi_scan.json
+WIFI_ERROR=$RUN_DIR/wifi_error
+MDM_PUBKEY=/etc/nex-agent/mdm-sign.pub.pem
+RELEASE_PUBKEY=/etc/nex-agent/release.pub.pem
 PAIRING_FILE=$STATE_DIR/pairing.json
 LAST_SYNC_FILE=$STATE_DIR/last_sync
 SERVER_EPOCH_FILE=$STATE_DIR/server_epoch
 EVENTS_FILE=$STATE_DIR/events.jsonl
 APPLIED_FILE=$STATE_DIR/applied_mode
-AGENT_VERSION=2
+AGENT_VERSION=3
 LOGO_DIR=$STATE_DIR/branding
 # Directorio en tmpfs montado sobre /etc/chromium/policies/managed por S99nex-os:
 # en cada arranque se vuelve a la política fallo-cerrado de la imagen.
@@ -47,6 +71,8 @@ DNS_UPSTREAM=$RUN_DIR/resolv.upstream
 DNS_LOG=$RUN_DIR/dns.log
 DNS_PID=$RUN_DIR/dnsmasq.pid
 FIRMWARE=$(cat /etc/nex-os-version 2>/dev/null || echo unknown)
+BUILD=$(cat /etc/nex-os-build 2>/dev/null)
+case "$BUILD" in '' | *[!0-9]*) BUILD=0 ;; esac
 
 log() { logger -t nex-agent -- "$*" 2>/dev/null || echo "nex-agent: $*" >&2; }
 
@@ -96,9 +122,10 @@ status_json() {
 	free=$(df -m /userdata 2>/dev/null | awk 'NR==2 {print $4}')
 	jq -nc --arg mode "${MODE:-starting}" --arg kind "${LOCK_KIND:-}" --argjson hardened $hardened \
 		--argjson dns $dns --argjson fw $fw --argjson up "${up:-0}" --argjson free "${free:-0}" \
-		--argjson v "$AGENT_VERSION" \
+		--argjson v "$AGENT_VERSION" --argjson build "$BUILD" --arg upd "$(update_state)" \
 		'{mode: $mode, lock_kind: (if $kind == "" then null else $kind end), hardened: $hardened,
-		  dns_filter: $dns, firewall: $fw, uptime: $up, free_mb: $free, agent: $v}'
+		  dns_filter: $dns, firewall: $fw, uptime: $up, free_mb: $free, agent: $v, build: $build,
+		  update: (if $upd == "" then null else $upd end)}'
 }
 
 # Estos equipos no tienen RTC con batería: tras un corte de luz el reloj
@@ -121,16 +148,59 @@ ensure_token() {
 	[ -s "$TOKEN_FILE" ] && grep -qx '[0-9a-f]\{64\}' "$TOKEN_FILE" && return 0
 	log "generando token de equipo"
 	head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | write_atomic "$TOKEN_FILE" 0600
-	rm -f "$CONFIG_FILE" "$PAIRING_FILE"
+	rm -f "$CONFIG_FILE" "$PAIRING_FILE" "$SIGNED_PAYLOAD" "$SIGNED_SIG" "$OVERRIDE_FILE"
 }
 
-# rpc <función> <json>: el token se inyecta en el cuerpo desde el archivo.
-rpc() {
+# post <ruta> <json>: el token se inyecta en el cuerpo desde el archivo.
+post() {
 	jq -cRn --argjson extra "$2" '{p_token: input} + $extra' < "$TOKEN_FILE" |
 	curl -fsS --proto =https --tlsv1.2 --max-time 20 --max-filesize 2097152 \
 		-H "apikey: $MDM_KEY" -H "Authorization: Bearer $MDM_KEY" \
 		-H "Content-Type: application/json" --data-binary @- \
-		"$MDM_URL/rest/v1/rpc/$1"
+		"$MDM_URL/$1"
+}
+
+rpc() { post "rest/v1/rpc/$1" "$2"; }
+
+# La configuración de un equipo vinculado solo llega firmada (Edge Function mdm-sync).
+signed_sync() { post functions/v1/mdm-sync "$1"; }
+
+# verify_config <payload> <firma>: firma del servidor + atada a este hardware.
+verify_config() {
+	[ -s "$1" ] && [ -s "$2" ] || return 1
+	[ -r "$MDM_PUBKEY" ] || { add_event_once signing_key_missing '{}'; log "falta $MDM_PUBKEY"; return 1; }
+	openssl dgst -sha256 -verify "$MDM_PUBKEY" -signature "$2" "$1" >/dev/null 2>&1 || {
+		add_event_once config_signature_invalid '{}'
+		log "configuración con firma inválida: se descarta"
+		return 1
+	}
+	jq -e --arg hw "$(hardware_id)" '
+		.kind == "nex-config" and .v == 1 and .status == "paired" and (.company.id | type == "string")
+		and (.device.id | type == "string") and (.apps | type == "array")
+		and (.server_epoch | type == "number") and ((.hardware_id // "") == $hw)' "$1" >/dev/null || {
+		add_event_once config_binding_invalid '{}'
+		log "configuración firmada para otro equipo o con formato inválido: se descarta"
+		return 1
+	}
+}
+
+# Carga la configuración firmada guardada (al arrancar): si no verifica, no hay configuración.
+load_config() {
+	if verify_config "$SIGNED_PAYLOAD" "$SIGNED_SIG"; then
+		jq -c . "$SIGNED_PAYLOAD" | write_atomic "$CONFIG_FILE" 0600
+	else
+		rm -f "$CONFIG_FILE"
+	fi
+}
+
+# Estado anterior en /var/lib (agente v2): se conservan token y eventos. La
+# configuración vieja no estaba firmada y se descarta (se pide de nuevo).
+migrate_state() {
+	[ -d "$OLD_STATE_DIR" ] && [ ! -e "$TOKEN_FILE" ] || return 0
+	for f in token events.jsonl applied_mode last_sync server_epoch; do
+		[ -f "$OLD_STATE_DIR/$f" ] && cp -p "$OLD_STATE_DIR/$f" "$STATE_DIR/$f"
+	done
+	log "estado migrado de $OLD_STATE_DIR"
 }
 
 sync_remote() {
@@ -143,7 +213,7 @@ sync_remote() {
 	body=$(jq -nc --arg fw "$FIRMWARE" --arg hw "$hw" --argjson st "$(status_json)" \
 		--slurpfile ev "$EVENTS_FILE" \
 		'{p_firmware: $fw, p_status: $st, p_events: $ev, p_hardware_id: (if $hw == "" then null else $hw end)}')
-	resp=$(rpc mdm_device_sync "$body") || { log "sync falló (sin conexión?)"; return 1; }
+	resp=$(signed_sync "$body") || { log "sync falló (sin conexión?)"; return 1; }
 	status=$(printf '%s' "$resp" | jq -r '.status // empty' 2>/dev/null)
 
 	# Entregados: se quitan de la cola los que se mandaron (pueden haber llegado nuevos).
@@ -161,7 +231,8 @@ sync_remote() {
 		unpaired) ;;
 		paired)
 			# Re-enrolado: se pide la configuración completa con el token nuevo.
-			resp=$(rpc mdm_device_sync "$(jq -nc --arg fw "$FIRMWARE" '{p_firmware: $fw}')") || return 1
+			resp=$(signed_sync "$(jq -nc --arg fw "$FIRMWARE" --arg hw "$hw" \
+				'{p_firmware: $fw, p_hardware_id: (if $hw == "" then null else $hw end)}')") || return 1
 			status=$(printf '%s' "$resp" | jq -r '.status // empty' 2>/dev/null)
 			;;
 		*) return 1 ;;
@@ -172,12 +243,20 @@ sync_remote() {
 	case "$status" in
 	unpaired)
 		printf '%s' "$resp" | jq -c '{pairing_code, pairing_expires_at}' | write_atomic "$PAIRING_FILE"
-		rm -f "$CONFIG_FILE"
+		rm -f "$CONFIG_FILE" "$SIGNED_PAYLOAD" "$SIGNED_SIG" "$OVERRIDE_FILE"
 		;;
 	paired)
-		printf '%s' "$resp" | jq -e '.company.id and (.apps | type == "array")' >/dev/null || {
-			log "respuesta de sync inválida"; return 1; }
-		printf '%s' "$resp" | jq -c . | write_atomic "$CONFIG_FILE" 0600
+		# Se guardan los bytes exactos que firmó el servidor.
+		printf '%s' "$resp" | jq -j '.payload // empty' > "$SIGNED_PAYLOAD.new"
+		printf '%s' "$resp" | jq -j '.sig // empty' | openssl base64 -d -A > "$SIGNED_SIG.new" 2>/dev/null
+		verify_config "$SIGNED_PAYLOAD.new" "$SIGNED_SIG.new" || {
+			rm -f "$SIGNED_PAYLOAD.new" "$SIGNED_SIG.new"
+			return 1
+		}
+		mv -f "$SIGNED_SIG.new" "$SIGNED_SIG" && mv -f "$SIGNED_PAYLOAD.new" "$SIGNED_PAYLOAD"
+		jq -c . "$SIGNED_PAYLOAD" | write_atomic "$CONFIG_FILE" 0600
+		# Con conexión manda el estado del servidor: se descarta el desbloqueo por código.
+		[ -e "$OVERRIDE_FILE" ] && { rm -f "$OVERRIDE_FILE"; log "desbloqueo por código reemplazado por el estado del servidor"; }
 		rm -f "$PAIRING_FILE"
 		;;
 	*)
@@ -187,7 +266,11 @@ sync_remote() {
 	esac
 
 	now | write_atomic "$LAST_SYNC_FILE" 0600
-	ep=$(printf '%s' "$resp" | jq -r '.server_epoch // empty' 2>/dev/null)
+	if [ -s "$CONFIG_FILE" ]; then
+		ep=$(jq -r '.server_epoch | floor' "$CONFIG_FILE" 2>/dev/null)
+	else
+		ep=$(printf '%s' "$resp" | jq -r '.server_epoch // empty' 2>/dev/null)
+	fi
 	case "$ep" in '' | *[!0-9]*) ;; *) echo "$ep" | write_atomic "$SERVER_EPOCH_FILE" 0600 ;; esac
 	clock_guard
 	return 0
@@ -199,14 +282,16 @@ compute_mode() {
 	REASON=""
 	LOCK_KIND=""
 	PAY_WARN=0
+	UNLOCK_UNTIL=0
 	if [ -s "$CONFIG_FILE" ]; then
-		last=$(cat "$LAST_SYNC_FILE" 2>/dev/null || echo 0)
-		days=$(jq -r '.company.offline_lock_days // 7' "$CONFIG_FILE")
+		# Última hora del servidor, firmada: es el ancla del límite offline (no se
+		# puede "rejuvenecer" editando archivos locales).
+		last=$(jq -r '.server_epoch | floor' "$CONFIG_FILE")
+		days=$(jq -r '.company.offline_lock_days // 7 | floor' "$CONFIG_FILE")
 		# La hora nunca se toma menor a la última hora del servidor: atrasar el
 		# reloj no evita el vencimiento del pago.
 		t=$(now)
-		srv=$(cat "$SERVER_EPOCH_FILE" 2>/dev/null || echo 0)
-		[ "$srv" -gt "$t" ] 2>/dev/null && t=$srv
+		[ "$last" -gt "$t" ] && t=$last
 		# Si hay control de pago pero la fecha no es un número válido, se bloquea (falla cerrado).
 		lock_at=$(jq -r 'if .payment == null then 0 else (.payment.lock_at | if type == "number" then floor else 1 end) end' "$CONFIG_FILE")
 		warn_at=$(jq -r '.payment.warn_at // 0 | if type == "number" then floor else 0 end' "$CONFIG_FILE")
@@ -230,6 +315,13 @@ compute_mode() {
 		else
 			MODE=active
 			[ "$warn_at" -gt 0 ] && [ "$t" -ge "$warn_at" ] && PAY_WARN=1
+		fi
+		# Código de desbloqueo offline: vale para bloqueo manual, de pago u offline,
+		# nunca para un reloj inválido.
+		if [ "$MODE" = locked ] && [ "$LOCK_KIND" != clock ] && override_valid "$t" "$last" "$days"; then
+			MODE=active
+			LOCK_KIND=""
+			REASON=""
 		fi
 	elif [ -s "$PAIRING_FILE" ]; then
 		MODE=unpaired
@@ -286,9 +378,14 @@ publish_ui_state() {
 	# Nunca se publica el token ni la configuración cruda: solo lo que la UI necesita.
 	cfg=$CONFIG_FILE; [ -s "$cfg" ] || cfg=/dev/null
 	pair=$PAIRING_FILE; [ -s "$pair" ] || pair=/dev/null
+	scan=$WIFI_SCAN; [ -s "$scan" ] || scan=/dev/null
+	ures=$(cat "$UNLOCK_RESULT" 2>/dev/null)
 	jq -n --arg mode "$MODE" --arg reason "$REASON" --arg logo "$logo" \
 		--arg kind "$LOCK_KIND" --argjson warn "$PAY_WARN" \
-		--slurpfile cfg "$cfg" --slurpfile pair "$pair" --argjson t "$(now)" '
+		--slurpfile cfg "$cfg" --slurpfile pair "$pair" --argjson t "$(now)" \
+		--argjson wifi "$(wifi_status_json)" --slurpfile scan "$scan" \
+		--arg ures "${ures% *}" --arg uat "${ures#* }" --argjson until "$UNLOCK_UNTIL" \
+		--arg upd "$(update_state)" --arg updver "$(update_version)" '
 		($cfg[0] // {}) as $c | ($pair[0] // {}) as $p |
 		{
 			mode: $mode,
@@ -302,7 +399,20 @@ publish_ui_state() {
 			payment_due: (if $warn == 1 then $c.payment.paid_until else null end),
 			pairing_code: (if $mode == "unpaired" then $p.pairing_code else null end),
 			pairing_expires_at: (if $mode == "unpaired" then $p.pairing_expires_at else null end),
-			apps: (if $mode == "active" then [($c.apps // [])[] | {id, name, kind, launch_url}] else [] end)
+			apps: (if $mode == "active"
+				then [($c.apps // [])[] | {id, name, kind, launch_url, pass_attestation: (.pass_attestation == true)}]
+				else [] end),
+			attestation: (if $mode == "active" then ($c.attestation // null) else null end),
+			wifi: (if $wifi == null then null else $wifi + {
+				scan: (($scan[0] // {}).networks // []),
+				scanned_at: (($scan[0] // {}).at // null)
+			} end),
+			unlock: {
+				result: (if $ures == "" then null else $ures end),
+				at: ($uat | tonumber? // null),
+				until: (if $until > 0 then $until else null end)
+			},
+			update: (if $upd == "" then null else {state: $upd, version: $updver} end)
 		}' | write_atomic "$PUBLIC_DIR/ui-state.json" 0644
 }
 
@@ -314,6 +424,9 @@ allowed_domains() {
 		if [ "$MODE" = active ] && [ -s "$CONFIG_FILE" ]; then
 			jq -r '.apps[].domains[]?' "$CONFIG_FILE"
 		fi
+		# El servidor de actualizaciones se permite en cualquier modo: un equipo
+		# bloqueado también tiene que poder actualizarse.
+		update_host
 	} | tr 'A-Z' 'a-z' | grep -x '[a-z0-9.-]\{1,253\}' | grep '\.' | sort -u > "$RUN_DIR/allow.tmp"
 
 	if [ -s "$CONFIG_FILE" ]; then
@@ -465,6 +578,282 @@ report_blocked() {
 		log "no se pudo enviar el reporte de bloqueos"
 }
 
+# --- Código de desbloqueo offline --------------------------------------------
+# code = HMAC-SHA256(unlock_secret, "<device_id>:<YYYYMMDD UTC>") -> primeros
+# 32 bits mod 10^8. La clave (64 caracteres = un bloque de SHA-256) nunca pasa
+# por argumentos de procesos: el HMAC se arma a mano con sha256sum.
+
+# bytes_xor <texto> <pad>: escribe cada byte del texto XOR pad.
+bytes_xor() {
+	for b in $(printf '%s' "$1" | od -An -tu1 -v); do
+		printf "\\$(printf '%03o' $((b ^ $2)))"
+	done
+}
+
+hex_to_bytes() {
+	for h in $(printf '%s' "$1" | sed 's/../& /g'); do
+		printf "\\$(printf '%03o' $((0x$h)))"
+	done
+}
+
+hmac64() {
+	inner=$({ bytes_xor "$1" 54; printf '%s' "$2"; } | sha256sum | cut -c1-64)
+	{ bytes_xor "$1" 92; hex_to_bytes "$inner"; } | sha256sum | cut -c1-64
+}
+
+# unlock_code_for <día (días desde 1970)>
+unlock_code_for() {
+	secret=$(jq -r '.unlock_secret // empty' "$CONFIG_FILE")
+	dev=$(jq -r '.device.id // empty' "$CONFIG_FILE")
+	printf '%s' "$secret" | grep -qx '[0-9a-f]\{64\}' && [ -n "$dev" ] || return 1
+	day=$(date -u -d "@$(($1 * 86400))" +%Y%m%d) || return 1
+	h=$(hmac64 "$secret" "$dev:$day" | cut -c1-8)
+	printf '%08d' $((0x$h % 100000000))
+}
+
+# override_valid <t> <última hora del servidor> <días offline>
+# El archivo se re-verifica siempre: editarlo a mano no sirve sin la clave.
+override_valid() {
+	[ -s "$OVERRIDE_FILE" ] || return 1
+	read -r code day until < "$OVERRIDE_FILE" || return 1
+	case "$code$day$until" in *[!0-9]*) return 1 ;; esac
+	[ "$1" -lt "$until" ] || return 1
+	# Un código vale para el día en que se ingresó (o el anterior) + 72 h.
+	[ "$until" -le $(((day + 2) * 86400 + 259200)) ] || return 1
+	# Nunca más de una semana después del límite offline: pasado eso, hay que conectarse.
+	[ "$1" -le $(($2 + ($3 + 7) * 86400)) ] || return 1
+	[ "$(unlock_code_for "$day")" = "$code" ] || return 1
+	UNLOCK_UNTIL=$until
+}
+
+unlock_result() { echo "$1 $(now)" | write_atomic "$UNLOCK_RESULT" 0600; }
+
+try_unlock_code() {
+	code=$1
+	if [ "$MODE" != locked ] || [ "$LOCK_KIND" = clock ] || [ ! -s "$CONFIG_FILE" ]; then
+		unlock_result unavailable
+		return 0
+	fi
+	t=$(now)
+	last=$(jq -r '.server_epoch | floor' "$CONFIG_FILE")
+	[ "$last" -gt "$t" ] && t=$last
+	# 5 intentos fallidos cada 15 minutos (se conserva entre reinicios).
+	fails=$(awk -v min=$((t - 900)) '$1 >= min' "$UNLOCK_FAILS" 2>/dev/null | wc -l)
+	if [ "$fails" -ge 5 ]; then
+		unlock_result rate_limited
+		return 0
+	fi
+	today=$((t / 86400))
+	for d in $today $((today - 1)); do
+		if [ "$(unlock_code_for "$d")" = "$code" ]; then
+			echo "$code $d $((t + 259200))" | write_atomic "$OVERRIDE_FILE" 0600
+			unlock_result ok
+			add_event unlock_code_used "$(jq -nc --argjson d "$d" '{day: $d}')"
+			return 0
+		fi
+	done
+	echo "$t" >> "$UNLOCK_FAILS"
+	tail -n 20 "$UNLOCK_FAILS" > "$UNLOCK_FAILS.tmp" && mv -f "$UNLOCK_FAILS.tmp" "$UNLOCK_FAILS"
+	unlock_result invalid
+	add_event_once unlock_code_invalid '{}'
+}
+
+# --- Wi-Fi (wpa_supplicant) ---------------------------------------------------
+wifi_cli() { wpa_cli -i "$WIFI_IFACE" "$@" 2>/dev/null; }
+
+wifi_status_json() {
+	command -v wpa_cli >/dev/null || { echo null; return; }
+	st=$(wifi_cli status) || { jq -nc --arg i "$WIFI_IFACE" '{iface: $i, state: null, ssid: null, ip: null, error: "Wi-Fi no disponible"}'; return; }
+	printf '%s\n' "$st" | jq -Rnc --arg i "$WIFI_IFACE" --arg err "$(cat "$WIFI_ERROR" 2>/dev/null)" '
+		[inputs | capture("^(?<k>[a-z_]+)=(?<v>.*)$")?] | map({(.k): .v}) | add // {} |
+		{iface: $i, state: (.wpa_state // null), ssid: (.ssid // null), ip: (.ip_address // null),
+		 error: (if $err == "" then null else $err end)}'
+}
+
+wifi_scan_request() {
+	wifi_cli scan >/dev/null && echo "$(now)" > "$RUN_DIR/wifi_scan_at"
+}
+
+# Los resultados se leen unos segundos después del pedido de scan.
+wifi_scan_collect() {
+	[ -f "$RUN_DIR/wifi_scan_at" ] || return 0
+	[ $(($(now) - $(cat "$RUN_DIR/wifi_scan_at"))) -ge 4 ] || return 0
+	rm -f "$RUN_DIR/wifi_scan_at"
+	wifi_cli scan_results | awk -F '\t' 'NR > 1 && $5 != "" {print $3 "\t" $4 "\t" $5}' |
+		jq -Rnc --argjson at "$(now)" '
+			[inputs | split("\t") | {ssid: .[2][:64], signal: (.[0] | tonumber? // -100),
+			  secure: (.[1] | test("WPA|WEP|SAE|RSN"))}]
+			| group_by(.ssid) | map(max_by(.signal)) | sort_by(-.signal) | .[:30]
+			| {at: $at, networks: .}' | write_atomic "$WIFI_SCAN" 0600
+}
+
+wifi_connect() {
+	ssid=$1 psk=$2
+	: > "$WIFI_ERROR"
+	id=$(wifi_cli add_network | tail -n 1)
+	case "$id" in '' | *[!0-9]*) echo "No se pudo configurar el Wi-Fi" > "$WIFI_ERROR"; return 0 ;; esac
+	# El SSID va en hexadecimal: no hay comillas que escapar.
+	hex=$(printf '%s' "$ssid" | od -An -tx1 -v | tr -d ' \n')
+	ok=1
+	wifi_cli set_network "$id" ssid "$hex" | grep -qx OK || ok=0
+	if [ -z "$psk" ]; then
+		wifi_cli set_network "$id" key_mgmt NONE | grep -qx OK || ok=0
+	else
+		wifi_cli set_network "$id" psk "\"$psk\"" | grep -qx OK || ok=0
+	fi
+	if [ $ok = 0 ]; then
+		wifi_cli remove_network "$id" >/dev/null
+		echo "Datos de red inválidos" > "$WIFI_ERROR"
+		return 0
+	fi
+	# Solo queda la red nueva (más simple para el usuario y sin redes viejas olvidadas).
+	for old in $(wifi_cli list_networks | awk -F '\t' 'NR > 1 {print $1}'); do
+		[ "$old" = "$id" ] || wifi_cli remove_network "$old" >/dev/null
+	done
+	wifi_cli set update_config 1 >/dev/null
+	wifi_cli select_network "$id" >/dev/null
+	wifi_cli save_config >/dev/null || log "no se pudo guardar la configuración de Wi-Fi"
+	add_event wifi_changed '{}'
+}
+
+wifi_forget() {
+	for old in $(wifi_cli list_networks | awk -F '\t' 'NR > 1 {print $1}'); do
+		wifi_cli remove_network "$old" >/dev/null
+	done
+	wifi_cli set update_config 1 >/dev/null
+	wifi_cli save_config >/dev/null
+	: > "$WIFI_ERROR"
+}
+
+# --- Pedidos de la UI -----------------------------------------------------------
+# El CGI ya valida, pero acá se vuelve a validar todo: la bandeja la escribe otro usuario.
+setup_inbox() {
+	mkdir -p "$INBOX_DIR"
+	if chgrp "$WWW_GROUP" "$INBOX_DIR" 2>/dev/null; then
+		chmod 0730 "$INBOX_DIR"
+	else
+		chmod 0700 "$INBOX_DIR"
+	fi
+}
+
+process_inbox() {
+	n=0
+	for f in "$INBOX_DIR"/*.json; do
+		[ -f "$f" ] || continue
+		n=$((n + 1))
+		[ $n -le 10 ] || { rm -f "$f"; continue; }
+		req=$(head -c 1024 "$f")
+		rm -f "$f"
+		action=$(printf '%s' "$req" | jq -r '.action // empty' 2>/dev/null)
+		case "$action" in
+		wifi_scan) wifi_scan_request ;;
+		wifi_forget) wifi_forget ;;
+		wifi_connect)
+			printf '%s' "$req" | jq -e '(.ssid | type == "string" and utf8bytelength >= 1 and utf8bytelength <= 32
+				and (test("[\\x00-\\x1f]") | not))
+				and (.psk | type == "string" and (. == "" or test("^[\\x20-\\x7e]{8,63}$")))' >/dev/null || continue
+			wifi_connect "$(printf '%s' "$req" | jq -j .ssid)" "$(printf '%s' "$req" | jq -j .psk)"
+			;;
+		unlock_code)
+			code=$(printf '%s' "$req" | jq -r '.code // empty')
+			printf '%s' "$code" | grep -qx '[0-9]\{8\}' && try_unlock_code "$code"
+			;;
+		esac
+	done
+}
+
+# --- Actualizaciones firmadas (OTA) ------------------------------------------------
+# El servidor ofrece un release; el equipo solo lo instala si la firma de la clave de
+# releases (offline, distinta de la del MDM) cubre build + sha256 y el build es mayor.
+update_field() { jq -r ".update.$1 // empty" "$CONFIG_FILE" 2>/dev/null; }
+
+update_host() {
+	[ -s "$CONFIG_FILE" ] || return 0
+	update_field url | sed -n 's#^https://\([A-Za-z0-9.-]*\)/.*#\1#p'
+}
+
+update_state() { cat "$UPDATE_DIR/state" 2>/dev/null | cut -d' ' -f1; }
+update_version() { cat "$UPDATE_DIR/version" 2>/dev/null; }
+
+set_update_state() { mkdir -p "$UPDATE_DIR"; echo "$1" > "$UPDATE_DIR/state"; }
+
+clear_update() { rm -rf "$UPDATE_DIR"; }
+
+check_update() {
+	[ -s "$CONFIG_FILE" ] && [ -r "$RELEASE_PUBKEY" ] || return 0
+	build=$(update_field build)
+	case "$build" in '' | *[!0-9]*) [ -d "$UPDATE_DIR" ] && clear_update; return 0 ;; esac
+	[ "$build" -gt "$BUILD" ] || { clear_update; return 0; }
+	url=$(update_field url)
+	sha=$(update_field sha256)
+	size=$(update_field size)
+	sig=$(update_field sig)
+	printf '%s' "$url" | grep -q '^https://[A-Za-z0-9.-]*/' &&
+		printf '%s' "$sha" | grep -qx '[0-9a-f]\{64\}' &&
+		case "$size" in '' | *[!0-9]*) false ;; *) true ;; esac || { log "update inválido"; return 0; }
+
+	mkdir -p "$UPDATE_DIR"
+	# Release nuevo: se descarta lo que hubiera de otro.
+	if [ "$(cat "$UPDATE_DIR/target" 2>/dev/null)" != "$build $sha" ]; then
+		[ -f "$UPDATE_DIR/pid" ] && kill "$(cat "$UPDATE_DIR/pid")" 2>/dev/null
+		rm -rf "$UPDATE_DIR" && mkdir -p "$UPDATE_DIR"
+		echo "$build $sha" > "$UPDATE_DIR/target"
+		update_field version | head -c 64 > "$UPDATE_DIR/version"
+		# La firma se verifica antes de bajar nada.
+		printf 'nex-update:v1:%s:%s' "$build" "$sha" > "$UPDATE_DIR/manifest"
+		printf '%s' "$sig" | openssl base64 -d -A > "$UPDATE_DIR/manifest.sig" 2>/dev/null
+		if ! openssl dgst -sha256 -verify "$RELEASE_PUBKEY" -signature "$UPDATE_DIR/manifest.sig" \
+			"$UPDATE_DIR/manifest" >/dev/null 2>&1; then
+			set_update_state failed
+			add_event update_signature_invalid "$(jq -nc --argjson b "$build" '{build: $b}')"
+			return 0
+		fi
+	fi
+
+	state=$(update_state)
+	case "$state" in
+	failed | installing) return 0 ;;
+	downloading)
+		[ -f "$UPDATE_DIR/pid" ] && kill -0 "$(cat "$UPDATE_DIR/pid")" 2>/dev/null && return 0
+		;;
+	esac
+
+	img=$UPDATE_DIR/update.img
+	if [ -f "$img" ] && [ "$(wc -c < "$img")" -ge "$size" ]; then
+		set_update_state verifying
+		if [ "$(sha256sum "$img" | cut -c1-64)" != "$sha" ]; then
+			rm -f "$img"
+			tries=$(($(cat "$UPDATE_DIR/tries" 2>/dev/null || echo 0) + 1))
+			echo $tries > "$UPDATE_DIR/tries"
+			[ $tries -ge 3 ] && { set_update_state failed; add_event update_failed '{"reason":"sha256"}'; return 0; }
+			set_update_state downloading
+			return 0
+		fi
+		set_update_state installing
+		add_event update_installing "$(jq -nc --argjson b "$build" '{build: $b}')"
+		sync_remote >/dev/null 2>&1
+		log "instalando build $build"
+		# Si el instalador vuelve, falló: no se reintenta en bucle.
+		$OTA_CMD "$img" || true
+		set_update_state failed
+		add_event update_failed '{"reason":"installer"}'
+		return 0
+	fi
+
+	free=$(df -k "$STATE_DIR" | awk 'NR == 2 {print $4}')
+	[ $((free * 1024)) -gt $((size + 104857600)) ] || {
+		add_event_once update_no_space '{}'
+		return 0
+	}
+	set_update_state downloading
+	# En segundo plano: el bucle principal no se puede frenar (la UI lo vigila).
+	(
+		curl -fsS --proto =https --tlsv1.2 -C - --max-time 7200 --max-filesize "$size" \
+			-o "$img" "$url" || log "descarga de actualización interrumpida"
+	) &
+	echo $! > "$UPDATE_DIR/pid"
+}
+
 # Confirma al servidor el bloqueo/desbloqueo realmente aplicado (sobrevive a reinicios).
 report_mode_change() {
 	cur="$MODE:$LOCK_KIND"
@@ -483,7 +872,12 @@ report_mode_change() {
 main() {
 	mkdir -p "$STATE_DIR" "$RUN_DIR" "$PUBLIC_DIR"
 	chmod 0700 "$STATE_DIR"
-	command -v jq >/dev/null && command -v curl >/dev/null || { log "faltan jq/curl"; exit 1; }
+	for bin in jq curl openssl; do
+		command -v $bin >/dev/null || { log "falta $bin"; exit 1; }
+	done
+	migrate_state
+	setup_inbox
+	load_config
 
 	last_sync_try=0
 	last_report=$(now)
@@ -509,6 +903,10 @@ main() {
 		fi
 
 		compute_mode
+		process_inbox
+		wifi_scan_collect
+		compute_mode
+		check_update
 		policy_changed=0
 		apply_chromium_policy && policy_changed=1
 		take_over_resolv
@@ -530,7 +928,12 @@ main() {
 			last_report=$t
 			report_blocked
 		fi
-		sleep 5
+		# Hasta 5 s de espera, salvo que la UI haya dejado un pedido.
+		for _ in 1 2 3 4 5; do
+			[ -n "$(ls -A "$INBOX_DIR" 2>/dev/null)" ] && break
+			[ -f "$RUN_DIR/wifi_scan_at" ] && [ $(($(now) - $(cat "$RUN_DIR/wifi_scan_at"))) -ge 4 ] && break
+			sleep 1
+		done
 	done
 }
 

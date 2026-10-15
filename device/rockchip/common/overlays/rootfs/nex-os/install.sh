@@ -24,7 +24,12 @@ chmod 0755 "$TARGET_DIR/etc/init.d/S99nex-os"
 	echo "Missing nex-agent.conf. Run tools/nex-os/build.sh with NEX_MDM_URL/NEX_MDM_ANON_KEY." >&2
 	exit 1
 }
-for bin in jq curl dnsmasq; do
+# Sin la clave pública de firma el equipo nunca aceptaría una configuración.
+[ -s "$SOURCE_DIR/mdm-sign.pub.pem" ] || {
+	echo "Missing mdm-sign.pub.pem. Run tools/nex-os/build.sh with NEX_MDM_SIGN_PUBKEY." >&2
+	exit 1
+}
+for bin in jq curl dnsmasq openssl; do
 	[ -x "$TARGET_DIR/usr/bin/$bin" ] || [ -x "$TARGET_DIR/usr/sbin/$bin" ] || {
 		echo "nex-agent needs '$bin' in the rootfs (buildroot/configs/rockchip/network/nex-mdm.config)." >&2
 		exit 1
@@ -33,7 +38,56 @@ done
 
 install -D -m 0755 "$SOURCE_DIR/nex-agent" "$TARGET_DIR/usr/bin/nex-agent"
 install -D -m 0600 "$SOURCE_DIR/nex-agent.conf" "$TARGET_DIR/etc/nex-agent.conf"
-install -d -m 0700 "$TARGET_DIR/var/lib/nex-agent"
+install -D -m 0644 "$SOURCE_DIR/mdm-sign.pub.pem" "$TARGET_DIR/etc/nex-agent/mdm-sign.pub.pem"
+# Sin clave de releases el equipo ignora las actualizaciones remotas.
+if [ -s "$SOURCE_DIR/release.pub.pem" ]; then
+	install -D -m 0644 "$SOURCE_DIR/release.pub.pem" "$TARGET_DIR/etc/nex-agent/release.pub.pem"
+else
+	echo "WARNING: no release.pub.pem: remote firmware updates disabled in this image." >&2
+	rm -f "$TARGET_DIR/etc/nex-agent/release.pub.pem"
+fi
+# Número de build (entero creciente): el equipo solo instala releases mayores.
+if [ -s "$SOURCE_DIR/nex-os.build" ]; then
+	install -D -m 0644 "$SOURCE_DIR/nex-os.build" "$TARGET_DIR/etc/nex-os-build"
+else
+	date -u +%s > "$TARGET_DIR/etc/nex-os-build"
+fi
+echo "NEX-OS build number: $(cat "$TARGET_DIR/etc/nex-os-build")"
+
+# Relay de la UI hacia el agente (Wi-Fi, código de desbloqueo).
+install -D -m 0755 "$SOURCE_DIR/cgi-nex" "$TARGET_DIR/opt/nex-os/www/cgi-bin/nex"
+
+# Usuarios sin privilegios: nex-www (servidor web local) y nex-ui (Chromium).
+add_user() { # nombre uid grupos-extra
+	grep -q "^$1:" "$TARGET_DIR/etc/group" || echo "$1:x:$2:" >> "$TARGET_DIR/etc/group"
+	grep -q "^$1:" "$TARGET_DIR/etc/passwd" ||
+		echo "$1:x:$2:$2:NEX-OS:/nonexistent:/bin/false" >> "$TARGET_DIR/etc/passwd"
+	if [ -f "$TARGET_DIR/etc/shadow" ] && ! grep -q "^$1:" "$TARGET_DIR/etc/shadow"; then
+		echo "$1:!:::::::" >> "$TARGET_DIR/etc/shadow"
+	fi
+	for g in $3; do
+		grep -q "^$g:" "$TARGET_DIR/etc/group" || continue
+		grep -Eq "^$g:[^:]*:[^:]*:(.*,)?$1(,.*)?$" "$TARGET_DIR/etc/group" && continue
+		sed -i -E "s/^($g:[^:]*:[^:]*:)(.+)$/\1\2,$1/; s/^($g:[^:]*:[^:]*:)$/\1$1/" "$TARGET_DIR/etc/group"
+	done
+}
+add_user nex-www 950 ""
+add_user nex-ui 951 "video audio input render"
+# El kiosk usa estos usuarios (S99nex-os). NEX_UI_USER=root solo para diagnosticar.
+sed -i '/^NEX_UI_USER=/d; /^NEX_WWW_USER=/d' "$TARGET_DIR/etc/default/nex-os"
+{
+	echo "NEX_UI_USER=${NEX_UI_USER:-nex-ui}"
+	echo "NEX_WWW_USER=nex-www"
+} >> "$TARGET_DIR/etc/default/nex-os"
+
+# Hora: estos equipos no tienen RTC; chrony corrige de golpe cualquier desvío
+# (el agente además adelanta el reloj a la última hora conocida).
+if [ -d "$TARGET_DIR/etc" ] && [ -x "$TARGET_DIR/usr/sbin/chronyd" ]; then
+	cat > "$TARGET_DIR/etc/chrony.conf" <<'CHRONY'
+pool pool.ntp.org iburst
+makestep 1 -1
+CHRONY
+fi
 
 POLICY_DIR="$TARGET_DIR/etc/chromium/policies/managed"
 install -D -m 0644 "$SOURCE_DIR/policies/nex-hardening.json" "$POLICY_DIR/nex-hardening.json"

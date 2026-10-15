@@ -3,3 +3,6 @@ device/rockchip/common/overlays/rootfs/nex-os/www/
 apps/nex-os/node_modules/
 apps/nex-os/dist/
 device/rockchip/common/overlays/rootfs/nex-os/nex-agent.conf
+device/rockchip/common/overlays/rootfs/nex-os/mdm-sign.pub.pem
+device/rockchip/common/overlays/rootfs/nex-os/release.pub.pem
+device/rockchip/common/overlays/rootfs/nex-os/nex-os.build

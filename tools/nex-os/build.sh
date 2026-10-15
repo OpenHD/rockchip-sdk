@@ -38,6 +38,27 @@ if [ "${NEX_MDM:-1}" = 1 ]; then
 		printf 'NEX_AGENT_BASE_DOMAINS="%s"\n' "${NEX_AGENT_BASE_DOMAINS:-}"
 	} > "$AGENT_CONF"
 	umask 022
+
+	# Claves públicas (ver tools/nex-os/keys/): la de firma del MDM es obligatoria,
+	# la de releases habilita las actualizaciones remotas.
+	OVERLAY_DIR="$SDK_DIR/device/rockchip/common/overlays/rootfs/nex-os"
+	copy_pubkey() { # <pem> <destino> <required|optional> <variable>
+
+		if [ -z "$1" ]; then
+			[ "$3" = required ] && { echo "$4 is required (public key PEM)" >&2; exit 1; }
+			rm -f "$OVERLAY_DIR/$2"
+			return 0
+		fi
+		openssl pkey -pubin -in "$1" -noout 2>/dev/null || { echo "$4: $1 is not a public key PEM" >&2; exit 1; }
+		openssl pkey -pubin -in "$1" -out "$OVERLAY_DIR/$2"
+	}
+	copy_pubkey "${NEX_MDM_SIGN_PUBKEY:-}" mdm-sign.pub.pem required NEX_MDM_SIGN_PUBKEY
+	copy_pubkey "${NEX_RELEASE_PUBKEY:-}" release.pub.pem optional NEX_RELEASE_PUBKEY
+	# Número de build creciente (las releases firmadas lo usan para no volver atrás).
+	NEX_OS_BUILD=${NEX_OS_BUILD:-$(date -u +%s)}
+	case "$NEX_OS_BUILD" in '' | *[!0-9]*) echo "NEX_OS_BUILD must be an integer" >&2; exit 1 ;; esac
+	echo "$NEX_OS_BUILD" > "$OVERLAY_DIR/nex-os.build"
+	printf 'NEX-OS build number: %s (firmá el release con este número)\n' "$NEX_OS_BUILD"
 	export VITE_NEX_MDM=1
 	# Panel para el QR de vinculación (ej. https://nex.example.com/admin). Opcional.
 	if [ -n "${NEX_ADMIN_URL:-}" ]; then

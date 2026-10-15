@@ -1,0 +1,10 @@
+#!/bin/bash
+# Shim de date (macOS) para las pruebas: soporta -u -d @N +FMT y -u -s @N (no-op).
+args=("$@"); u=""; d=""; fmt=""; set_=0
+while [ $# -gt 0 ]; do
+  case "$1" in -u) u=-u ;; -d) d=$2; shift ;; -s) set_=1; shift ;; +*) fmt=$1 ;; esac; shift
+done
+[ $set_ = 1 ] && exit 0
+if [ -n "$d" ]; then exec /bin/date $u -r "${d#@}" "${fmt:-+%s}"; fi
+if [ -n "${FAKE_NOW:-}" ] && [ "$fmt" = "+%s" -o -z "$fmt" ]; then echo "$FAKE_NOW"; exit 0; fi
+exec /bin/date "${args[@]}"
