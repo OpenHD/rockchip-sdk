@@ -325,13 +325,13 @@ al final de `schema-mdm-v7.sql` (requiere las extensiones `pg_cron` y `pg_net`).
 
 ### Pendiente del diseño
 
-- **Configuración de red en el TV.** No hay pantalla de Wi-Fi: si el equipo cambia de red, no puede reconectarse
-  desde el control remoto. Es necesaria antes de producción, sobre todo con el bloqueo por días sin conexión.
-- Estados `aviso`/`restringido`, `device_state_log`, API de cobranza con API keys, QR y teléfono de pago.
-- Código de desbloqueo offline (HMAC por día).
-- Re-enrolamiento por `hardware_id`, firma HMAC del estado local, dm-verity y Secure Boot.
-- QR en la pantalla de vinculación: hoy solo se muestra el código. `src/utils/qr.ts` usa un servicio externo,
-  y mandarle el código a un tercero no es aceptable.
+Actualizado en v8 (ver las secciones v8 más abajo): la pantalla de Wi-Fi, el código de desbloqueo offline, la API
+para el ISP, la configuración firmada (en lugar de la "firma HMAC del estado local") y el re-enrolamiento por
+`hardware_id` ya están hechos. Queda:
+
+- Estados `aviso`/`restringido`, `device_state_log`, QR y teléfono de pago.
+- **Arranque cerrado:** U-Boot sin consola ni modos de descarga por tecla, recovery sin ADB ni consola serie,
+  dm-verity y Secure Boot (AVB + eFuse en RK3328). Sin esto, quien reflashea el equipo por USB lo libera.
 
 
 ## v8: configuración firmada, API para ISP y actualizaciones (servidor)
@@ -516,3 +516,79 @@ imagen anterior con un build nuevo.
   - backfill de `unlock_secret` en equipos existentes;
   - `sign-release.sh` → `openssl dgst -verify` → `mdm_publish_release` aceptado.
 - **No probado contra un Supabase real** (gateway, `verify_jwt` ni secretos).
+
+## v8: equipo (nex-agent, UI y firmware)
+
+Archivos: `device/rockchip/common/overlays/rootfs/nex-os/` (`nex-agent`, `cgi-nex`, `S99nex-os`, `install.sh`),
+`src/mdm/`, `tools/nex-os/build.sh`, `tools/nex-os/tests/test-agent.sh`.
+
+### Build
+
+```sh
+NEX_MDM_URL=https://xxxx.supabase.co NEX_MDM_ANON_KEY=... \
+NEX_MDM_SIGN_PUBKEY=/ruta/mdm-sign.pub.pem \
+NEX_RELEASE_PUBKEY=/ruta/release.pub.pem \
+NEX_OS_BUILD=1042 \
+tools/nex-os/build.sh
+```
+
+- **`NEX_MDM_SIGN_PUBKEY` es obligatoria.** Sin ella el equipo nunca aceptaría una configuración, así que el build
+  falla.
+- **`NEX_RELEASE_PUBKEY` es opcional.** Sin ella la imagen ignora las actualizaciones remotas.
+- **`NEX_OS_BUILD`:** si no se pasa, se usa la hora UTC de compilación. Es el número que se firma en el release.
+
+### Qué hace el equipo
+
+- **Configuración firmada y atada al hardware.** Se guarda en `/userdata/nex-agent` y se re-verifica en cada arranque.
+  Si alguien edita ese directorio o copia la configuración de otro equipo, el equipo queda en "Iniciando…" hasta el
+  próximo sync. El límite offline se cuenta desde `server_epoch` firmado, no desde archivos locales.
+- **Estado en `/userdata`.** El sistema puede quedar de solo lectura (dm-verity). La política de Chromium vive en
+  tmpfs: `S99nex-os` la monta sobre `/etc/chromium/policies/managed`, así que cada arranque empieza fallo-cerrado.
+- **Agente caído.** Si `ui-state.json` tiene más de 2 minutos, la UI muestra la pantalla de espera.
+- **Reloj sin RTC.** Al arrancar y tras cada sync, el agente adelanta el reloj, nunca lo atrasa, hasta la última hora
+  conocida: servidor, último sync o fecha de la imagen. chrony corrige de golpe (`makestep 1 -1`).
+- **Código de desbloqueo.** El usuario lo ingresa en la pantalla de bloqueo y el equipo desbloquea 72 h.
+  - No sirve contra un bloqueo por reloj.
+  - Tampoco sirve más de 7 días después del límite offline.
+  - Admite 5 intentos fallidos cada 15 minutos.
+  - Con conexión, el estado del servidor reemplaza al código.
+  - Límite conocido: el secreto vive en `/userdata`. Quien extraiga esa partición por USB podría generar códigos
+    para ese equipo, pero solo dentro de la ventana offline + 7 días.
+- **Wi-Fi desde el control remoto.**
+  - La UI llama a `POST /cgi-bin/nex` (busybox httpd corre como `nex-www`), que deja el pedido en
+    `/run/nex-agent/inbox`.
+  - El agente lo aplica con `wpa_cli`; la red se guarda vía `save_config`, que en solo lectura termina en
+    `/userdata/cfg`.
+  - Otras páginas no pueden usar el relay: se exige `Content-Type: application/json` (preflight CORS que httpd no
+    acepta) y el `Origin` de la UI.
+- **Chromium sin root.** Corre como `nex-ui`, con el perfil en `/userdata/nex-ui`. Para diagnosticar se puede volver a
+  root con `NEX_UI_USER=root` al compilar.
+- **Actualizaciones.**
+  - El equipo verifica la firma de la clave de releases sobre `nex-update:v1:<build>:<sha256>` antes de bajar nada.
+  - Baja en segundo plano a `/userdata/nex-agent/update`, verifica el sha256 e instala con `update ota <imagen>`
+    (configurable con `NEX_AGENT_OTA_CMD`).
+  - No instala builds menores al propio. Si el instalador falla, no reintenta en bucle.
+- **Atestación.** Las apps marcadas con "Pasa atestación" se abren con `#nex_attestation=<JWT>`.
+
+### Verificado
+
+- `tools/nex-os/tests/test-agent.sh` pasa 32 escenarios contra un servidor falso con firmas reales:
+  - configuración editada, firmada con otra clave, de otro hardware o sin firma;
+  - bloqueo manual, offline y por reloj;
+  - código de desbloqueo: válido, inválido, de ayer, vencido, override editado, rate limit y descarte al sincronizar;
+  - pedidos inválidos en la bandeja;
+  - actualizaciones: firma correcta, firmada con la clave del MDM, downgrade, instalador fallido.
+- El HMAC hecho con `sha256sum` coincide con `openssl dgst -hmac`.
+- El CGI acepta los pedidos de la UI y rechaza otro origen, otro Content-Type, GET y acciones inválidas.
+- Web: `tsc`, ESLint y `vite build` en modo MDM.
+
+### Falta probar en un TV box real
+
+Todo lo anterior se probó en una Mac, no en el equipo. Antes de producción hay que confirmar:
+
+- `busybox httpd -u` con CGI;
+- Chromium como `nex-ui` (sandbox, GPU, audio) y el socket de Wayland;
+- `wpa_cli` y `save_config`;
+- que exista `update ota` del recovery de Rockchip y que funcione con `update.img`;
+- el montaje de las políticas en tmpfs;
+- el script se probó con bash, no con ash de busybox: falta confirmar en el equipo el HMAC con `printf` octal.
