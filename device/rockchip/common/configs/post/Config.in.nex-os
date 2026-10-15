@@ -1,0 +1,21 @@
+#
+
+menuconfig RK_NEX_MDM
+	bool "NEX-OS remote management (nex-agent)"
+	default y
+	help
+	  Install nex-agent: remote lock, app allowlist, company logo and
+	  blocked-domain reports. See apps/nex-os/docs/GESTION_REMOTA.md.
+
+if RK_NEX_MDM
+
+config RK_NEX_MDM_HARDEN
+	bool "closed TV mode (production hardening)"
+	default y
+	help
+	  Disable adbd, the frecon VT shell and the passwordless serial
+	  shell, and lock the root password. Disable this for development
+	  images only: a hardened image can only be recovered by reflashing.
+
+endif # NEX-OS MDM
+endmenuconfig # NEX-OS MDM

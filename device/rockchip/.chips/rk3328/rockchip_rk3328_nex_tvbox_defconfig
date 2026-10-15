@@ -1,0 +1,5 @@
+# NEX-OS en TV box RK3318/RK3328 (ver apps/nex-os/docs/INSTALACION_TALLER.md).
+# DTS base: A95X Z2 (RK3318). Otros modelos necesitan su propio DTS: copiar este
+# y ajustar Wi-Fi, LED, IR y eMMC según el DTB original del equipo.
+RK_KERNEL_DTS_NAME="rk3318-a95x-z2"
+RK_KERNEL_CFG_FRAGMENTS="nex-mdm.config"
