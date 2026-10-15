@@ -666,7 +666,15 @@ wifi_status_json() {
 	st=$(wifi_cli status) || { jq -nc --arg i "$WIFI_IFACE" '{iface: $i, state: null, ssid: null, ip: null, error: "Wi-Fi no disponible"}'; return; }
 	printf '%s\n' "$st" | jq -Rnc --arg i "$WIFI_IFACE" --arg err "$(cat "$WIFI_ERROR" 2>/dev/null)" '
 		[inputs | capture("^(?<k>[a-z_]+)=(?<v>.*)$")?] | map({(.k): .v}) | add // {} |
-		{iface: $i, state: (.wpa_state // null), ssid: (.ssid // null), ip: (.ip_address // null),
+		# Estados de wpa_supplicant (COMPLETED, 4WAY_HANDSHAKE...) a los de la UI.
+		(.wpa_state // "" | ascii_downcase) as $s |
+		{iface: $i, ssid: (.ssid // null), ip: (.ip_address // null),
+		 state: (if $s == "completed" then (if .ip_address then "connected" else "obtaining_ip" end)
+			elif $s == "scanning" then "scanning"
+			elif $s == "" then null
+			elif ($s | test("^(associating|associated|authenticating|4way_handshake|group_handshake)$")) then "connecting"
+			elif $s == "interface_disabled" then "disabled"
+			else "disconnected" end),
 		 error: (if $err == "" then null else $err end)}'
 }
 

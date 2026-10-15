@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
 /** Rutas del panel en el hash (#/c/<empresa>/<sección>?f=<filtro>&d=<equipo>): el botón "atrás" funciona. */
-export type CompanySection = 'resumen' | 'equipos' | 'apps' | 'marca' | 'avisos' | 'miembros' | 'auditoria';
-export type NexSection = 'nueva-empresa' | 'catalogo' | 'pirateria';
+export type CompanySection = 'resumen' | 'equipos' | 'apps' | 'marca' | 'avisos' | 'miembros' | 'api' | 'auditoria';
+export type NexSection = 'nueva-empresa' | 'catalogo' | 'firmware' | 'pirateria';
 
 export type Route =
   | { scope: 'company'; companyId: string; section: CompanySection; filter?: string; device?: string }
   | { scope: 'nex'; section: NexSection }
   | { scope: 'home' };
 
-const COMPANY_SECTIONS: CompanySection[] = ['resumen', 'equipos', 'apps', 'marca', 'avisos', 'miembros', 'auditoria'];
-const NEX_SECTIONS: NexSection[] = ['nueva-empresa', 'catalogo', 'pirateria'];
+const COMPANY_SECTIONS: CompanySection[] = ['resumen', 'equipos', 'apps', 'marca', 'avisos', 'miembros', 'api', 'auditoria'];
+const NEX_SECTIONS: NexSection[] = ['nueva-empresa', 'catalogo', 'firmware', 'pirateria'];
 
 export function parseHash(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');

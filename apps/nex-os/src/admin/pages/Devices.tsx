@@ -3,10 +3,13 @@ import {
   Activity,
   CalendarPlus,
   CircleCheck,
+  Copy,
   CreditCard,
   EllipsisVertical,
   HardDrive,
+  Hash,
   Hourglass,
+  KeyRound,
   Lock,
   LockOpen,
   Pencil,
@@ -18,9 +21,21 @@ import {
   Tv,
   Unlink,
 } from 'lucide-react';
-import { db, deviceStatus, enforcement, EVENT_LABELS, isOnline, run, type Company, type Device, type DeviceEvent } from '../api';
+import {
+  db,
+  deviceStatus,
+  enforcement,
+  EVENT_LABELS,
+  EXTERNAL_REF_RE,
+  isOnline,
+  run,
+  type Company,
+  type Device,
+  type DeviceEvent,
+  type UnlockCode,
+} from '../api';
 import { FILTERS, healthIssues, paymentText, STATUS_META, type Filter } from '../deviceMeta';
-import { addMonths, formatDate, formatUptime, LOCK_REASONS, relativeTime, todayIso } from '../format';
+import { addMonths, copyText, formatDate, formatUptime, LOCK_REASONS, relativeTime, todayIso } from '../format';
 import { useToast } from '../toast';
 import {
   Badge,
@@ -50,7 +65,14 @@ type Dialog =
   | { kind: 'payment'; device: Device }
   | { kind: 'rename'; device: Device }
   | { kind: 'unpair'; device: Device }
+  | { kind: 'external-ref'; device: Device }
+  | { kind: 'unlock-code'; device: Device; result: UnlockCode }
   | { kind: 'claim'; code?: string };
+
+// RPC de v8 en un solo lugar (contrato NEX MDM v8).
+const rpcUnlockCode = (device: string) => run<UnlockCode>(db().rpc('mdm_unlock_code', { p_device: device }));
+const rpcSetExternalRef = (device: string, ref: string | null) =>
+  run(db().rpc('mdm_set_external_ref', { p_device: device, p_ref: ref }));
 
 function useAction(onDone: () => void) {
   const toast = useToast();
@@ -252,6 +274,77 @@ function UnpairModal({ device, onClose, onDone }: { device: Device; onClose: () 
   );
 }
 
+function ExternalRefModal({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
+  const [ref, setRef] = useState(device.external_ref ?? '');
+  const { busy, error, exec } = useAction(onDone);
+  const value = ref.trim();
+  const valid = value === '' || EXTERNAL_REF_RE.test(value);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!valid) return;
+    exec(() => rpcSetExternalRef(device.id, value || null), value ? 'N.º de cliente guardado' : 'N.º de cliente quitado').then(
+      (ok) => ok && onClose(),
+    );
+  };
+  return (
+    <Modal title="N.º de cliente (ISP)" description={device.name ?? device.id} onClose={onClose}>
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field
+          label="N.º de cliente"
+          hint="El que usa tu sistema de gestión o facturación. Sirve para operar el equipo por API (ref:<n.º>). Único en la empresa."
+        >
+          <input
+            autoFocus
+            className={`${inputClass} font-mono`}
+            maxLength={64}
+            placeholder="ABO-000123"
+            value={ref}
+            onChange={(e) => setRef(e.target.value)}
+          />
+        </Field>
+        {!valid && <p className="text-xs text-rose-300">Solo letras, números y . _ : @ - (empezando por letra o número, hasta 64).</p>}
+        <ErrorText error={error} />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button type="submit" disabled={busy || !valid}>Guardar</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function UnlockCodeModal({ device, result, onClose }: { device: Device; result: UnlockCode; onClose: () => void }) {
+  const toast = useToast();
+  const pretty = `${result.code.slice(0, 4)} ${result.code.slice(4)}`;
+  const copy = async () => toast.show((await copyText(result.code)) ? 'Código copiado' : 'No se pudo copiar', 'info');
+  return (
+    <Modal
+      title="Código de desbloqueo"
+      description={device.name ?? device.id}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" icon={Copy} onClick={copy}>Copiar</Button>
+          <Button onClick={onClose}>Listo</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="rounded-2xl border border-indigo-500/25 bg-indigo-500/[0.07] py-6 text-center font-mono text-5xl font-semibold tracking-[0.15em] text-white tabular-nums">
+          {pretty}
+        </div>
+        <ul className="flex flex-col gap-1.5 text-sm text-zinc-300">
+          <li>Válido el {formatDate(result.valid_on)} (UTC) y hasta el día siguiente.</li>
+          <li>Desbloquea el equipo por {result.hours ?? 72} h, aunque no tenga internet.</li>
+          <li className="text-zinc-500">
+            Dictáselo al cliente: en el TV bloqueado elige "Tengo un código de desbloqueo" y lo ingresa con el control. Queda registrado en la auditoría.
+          </li>
+        </ul>
+      </div>
+    </Modal>
+  );
+}
+
 function formatCodeInput(v: string): string {
   const clean = v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   return clean.length > 4 ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
@@ -348,6 +441,18 @@ function DeviceDrawer({
     }
   };
 
+  const [codeBusy, setCodeBusy] = useState(false);
+  const unlockCode = async () => {
+    setCodeBusy(true);
+    try {
+      onAction({ kind: 'unlock-code', device, result: await rpcUnlockCode(device.id) });
+    } catch (err) {
+      toast.show((err as Error).message, 'error');
+    } finally {
+      setCodeBusy(false);
+    }
+  };
+
   return (
     <Drawer
       title={device.name ?? 'Equipo sin nombre'}
@@ -377,7 +482,24 @@ function DeviceDrawer({
             <Button variant="danger" icon={Lock} onClick={() => onAction({ kind: 'lock', device })}>Bloquear</Button>
           )}
           <Button variant="secondary" icon={CreditCard} onClick={() => onAction({ kind: 'payment', device })}>Registrar pago</Button>
+          <Button variant="secondary" icon={KeyRound} disabled={codeBusy} onClick={unlockCode} className="col-span-2">
+            Código de desbloqueo
+          </Button>
         </div>
+        <p className="-mt-4 text-xs text-zinc-500">
+          Para un equipo bloqueado sin internet: el cliente ingresa el código en el TV y se desbloquea por 72 h.
+        </p>
+
+        <section>
+          <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">N.º de cliente (ISP)</h3>
+          <div className="flex items-center justify-between rounded-xl border border-white/[0.07] px-4 py-2">
+            <span className={`flex items-center gap-2 text-sm ${device.external_ref ? 'font-mono text-zinc-100' : 'text-zinc-500'}`}>
+              <Hash className="h-4 w-4 text-zinc-500" aria-hidden />
+              {device.external_ref ?? 'Sin asignar'}
+            </span>
+            <IconButton icon={Pencil} label="Editar n.º de cliente" onClick={() => onAction({ kind: 'external-ref', device })} />
+          </div>
+        </section>
 
         <section>
           <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Pago</h3>
@@ -461,7 +583,10 @@ export default function DevicesPage({
   const shown = devices.filter((d) => {
     const f = FILTERS.find((x) => x.id === filter)!;
     const q = query.trim().toLowerCase();
-    return f.test(d, company) && (!q || (d.name ?? '').toLowerCase().includes(q) || d.id.startsWith(q));
+    return (
+      f.test(d, company) &&
+      (!q || (d.name ?? '').toLowerCase().includes(q) || d.id.startsWith(q) || (d.external_ref ?? '').toLowerCase().includes(q))
+    );
   });
   const selected = devices.find((d) => d.id === selectedId) ?? null;
 
@@ -486,7 +611,7 @@ export default function DevicesPage({
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="relative w-full lg:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
-          <input className={`${inputClass} pl-9`} placeholder="Buscar por nombre o ID…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input className={`${inputClass} pl-9`} placeholder="Buscar por nombre, ID o n.º de cliente…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
@@ -613,6 +738,8 @@ export default function DevicesPage({
       {dialog?.kind === 'unpair' && (
         <UnpairModal device={dialog.device} onClose={() => setDialog(null)} onDone={() => { onSelect(null); data.reload(); }} />
       )}
+      {dialog?.kind === 'external-ref' && <ExternalRefModal device={dialog.device} onClose={() => setDialog(null)} onDone={data.reload} />}
+      {dialog?.kind === 'unlock-code' && <UnlockCodeModal device={dialog.device} result={dialog.result} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'claim' && <ClaimModal company={company} initialCode={dialog.code} onClose={() => setDialog(null)} onDone={data.reload} />}
     </>
   );

@@ -5,12 +5,14 @@ import {
   Bell,
   Building2,
   ChevronDown,
+  Cpu,
   KeyRound,
   LayoutDashboard,
   LogOut,
   Menu as MenuIcon,
   Package,
   Palette,
+  Plug,
   ScrollText,
   ShieldCheck,
   Skull,
@@ -26,9 +28,9 @@ import AlertsPage from './pages/Alerts';
 import AppsPage from './pages/Apps';
 import BrandPage from './pages/Brand';
 import DevicesPage from './pages/Devices';
-import { CatalogPage, NewCompanyPage, PiracyPage } from './pages/Nex';
+import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/Nex';
 import OverviewPage from './pages/Overview';
-import { AuditPage, MembersPage } from './pages/Team';
+import { ApiKeysPage, AuditPage, MembersPage } from './pages/Team';
 import { takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
 import { Button, ErrorText, Field, inputClass, Skeleton, ToastProvider } from './ui';
 import { useCompanyData } from './useCompanyData';
@@ -253,12 +255,14 @@ const COMPANY_NAV: { id: CompanySection; label: string; icon: LucideIcon }[] = [
   { id: 'marca', label: 'Marca y cobro', icon: Palette },
   { id: 'avisos', label: 'Avisos', icon: Bell },
   { id: 'miembros', label: 'Miembros', icon: Users },
+  { id: 'api', label: 'API', icon: Plug },
   { id: 'auditoria', label: 'Auditoría', icon: ScrollText },
 ];
 
 const NEX_NAV: { id: NexSection; label: string; icon: LucideIcon }[] = [
   { id: 'nueva-empresa', label: 'Nueva empresa', icon: Building2 },
   { id: 'catalogo', label: 'Catálogo de apps', icon: Package },
+  { id: 'firmware', label: 'Firmware', icon: Cpu },
   { id: 'pirateria', label: 'Anti-piratería', icon: Skull },
 ];
 
@@ -344,6 +348,8 @@ function CompanyWorkspace({
       return <AlertsPage company={company} onChanged={onCompanyChanged} />;
     case 'miembros':
       return <MembersPage company={company} />;
+    case 'api':
+      return <ApiKeysPage company={company} />;
     case 'auditoria':
       return <AuditPage company={company} />;
     default:
@@ -474,6 +480,8 @@ function Shell({ session }: { session: Session }) {
             <NewCompanyPage onCreated={(id) => { setTick((t) => t + 1); navigate({ scope: 'company', companyId: id, section: 'resumen' }); }} />
           ) : effective.scope === 'nex' && effective.section === 'catalogo' ? (
             <CatalogPage />
+          ) : effective.scope === 'nex' && effective.section === 'firmware' ? (
+            <FirmwarePage companies={companies} />
           ) : effective.scope === 'nex' && effective.section === 'pirateria' ? (
             <PiracyPage />
           ) : (

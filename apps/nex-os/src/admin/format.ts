@@ -77,4 +77,21 @@ export const AUDIT_LABELS: Record<string, string> = {
   'alerts.update': 'Configuró avisos',
   'catalog.upsert': 'Editó el catálogo',
   'domain.classify': 'Clasificó un dominio',
+  'device.unlock_code': 'Pidió un código de desbloqueo',
+  'device.external_ref': 'Cambió el n.º de cliente',
+  'api_key.create': 'Creó una clave de API',
+  'api_key.revoke': 'Revocó una clave de API',
+  'catalog.attestation': 'Cambió la atestación de una app',
+  'firmware.publish': 'Publicó firmware',
+  'firmware.target': 'Asignó firmware',
 };
+
+/** Copia al portapapeles; false si el navegador no lo permite. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}

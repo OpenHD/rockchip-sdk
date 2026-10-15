@@ -12,6 +12,42 @@ export interface MdmApp {
   name: string;
   kind: 'web' | 'internal';
   launch_url: string | null;
+  /** La empresa habilitó pasarle al servicio la atestación del equipo (JWT). */
+  pass_attestation: boolean;
+}
+
+export interface MdmWifiNetwork {
+  ssid: string;
+  /** dBm (negativo; más cerca de 0 = mejor señal). */
+  signal: number;
+  secure: boolean;
+}
+
+export interface MdmWifi {
+  iface: string | null;
+  state: string | null;
+  ssid: string | null;
+  ip: string | null;
+  scan: MdmWifiNetwork[];
+  scannedAt: number | null;
+  error: string | null;
+}
+
+export type MdmUnlockResult = 'ok' | 'invalid' | 'rate_limited' | 'unavailable';
+
+export interface MdmUnlock {
+  result: MdmUnlockResult | null;
+  /** Epoch (s) del último intento procesado por el agente. */
+  at: number | null;
+  /** Epoch (s) hasta el que dura el desbloqueo por código. */
+  until: number | null;
+}
+
+export type MdmUpdateState = 'downloading' | 'verifying' | 'installing' | 'failed';
+
+export interface MdmUpdate {
+  state: MdmUpdateState;
+  version: string | null;
 }
 
 export interface MdmState {
@@ -26,6 +62,11 @@ export interface MdmState {
   pairingCode: string | null;
   pairingExpiresAt: string | null;
   apps: MdmApp[];
+  wifi: MdmWifi | null;
+  unlock: MdmUnlock;
+  /** JWT de atestación: solo en modo 'active'. */
+  attestation: string | null;
+  update: MdmUpdate | null;
 }
 
 export const isMdmBuild = import.meta.env.VITE_NEX_MDM === '1';
@@ -41,6 +82,12 @@ const STALE_MS = 15000;
 const AGENT_DEAD_MS = 120000;
 const MODES: readonly MdmMode[] = ['starting', 'unpaired', 'locked', 'active'];
 const LOCK_KINDS: readonly MdmLockKind[] = ['manual', 'payment', 'clock', 'offline'];
+const UNLOCK_RESULTS: readonly MdmUnlockResult[] = ['ok', 'invalid', 'rate_limited', 'unavailable'];
+const UPDATE_STATES: readonly MdmUpdateState[] = ['downloading', 'verifying', 'installing', 'failed'];
+const MAX_SCAN = 40;
+/** JWT compacto (header.payload.firma en base64url) y de tamaño acotado. */
+const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+const NO_UNLOCK: MdmUnlock = { result: null, at: null, until: null };
 
 const STARTING: MdmState = {
   mode: 'starting',
@@ -54,10 +101,72 @@ const STARTING: MdmState = {
   pairingCode: null,
   pairingExpiresAt: null,
   apps: [],
+  wifi: null,
+  unlock: NO_UNLOCK,
+  attestation: null,
+  update: null,
 };
 
 function str(v: unknown, max = 280): string | null {
   return typeof v === 'string' && v.length > 0 ? v.slice(0, max) : null;
+}
+
+/** Entero acotado (epoch, dBm…); cualquier otra cosa es null. */
+function int(v: unknown, min: number, max: number): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : null;
+}
+
+function obj(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+const EPOCH_MAX = 2 ** 32;
+
+function parseNetwork(v: unknown): MdmWifiNetwork | null {
+  const o = obj(v);
+  if (!o) return null;
+  const ssid = str(o.ssid, 32);
+  const signal = int(o.signal, -127, 0);
+  if (!ssid || signal === null) return null;
+  return { ssid, signal, secure: o.secure !== false };
+}
+
+function parseWifi(v: unknown): MdmWifi | null {
+  const o = obj(v);
+  if (!o) return null;
+  const state = str(o.state, 24);
+  const ip = str(o.ip, 45);
+  return {
+    iface: str(o.iface, 16),
+    state: state && /^[a-z_]+$/.test(state) ? state : null,
+    ssid: str(o.ssid, 32),
+    ip: ip && /^[0-9a-fA-F.:]+$/.test(ip) ? ip : null,
+    scan: Array.isArray(o.scan)
+      ? o.scan
+          .slice(0, MAX_SCAN)
+          .map(parseNetwork)
+          .filter((n): n is MdmWifiNetwork => n !== null)
+      : [],
+    scannedAt: int(o.scanned_at, 0, EPOCH_MAX),
+    error: str(o.error, 160),
+  };
+}
+
+function parseUnlock(v: unknown): MdmUnlock {
+  const o = obj(v);
+  if (!o) return NO_UNLOCK;
+  return {
+    result: UNLOCK_RESULTS.find((r) => r === o.result) ?? null,
+    at: int(o.at, 0, EPOCH_MAX),
+    until: int(o.until, 0, EPOCH_MAX),
+  };
+}
+
+function parseUpdate(v: unknown): MdmUpdate | null {
+  const o = obj(v);
+  const state = o && UPDATE_STATES.find((s) => s === o.state);
+  if (!o || !state) return null;
+  return { state, version: str(o.version, 32) };
 }
 
 function parseApp(v: unknown): MdmApp | null {
@@ -76,7 +185,7 @@ function parseApp(v: unknown): MdmApp | null {
       return null;
     }
   }
-  return { id, name, kind: o.kind, launch_url: launchUrl };
+  return { id, name, kind: o.kind, launch_url: launchUrl, pass_attestation: o.pass_attestation === true };
 }
 
 /**
@@ -91,6 +200,7 @@ export function parseAgentState(raw: unknown, now = Date.now()): MdmState {
   if (typeof o.updated_at !== 'number' || now - o.updated_at * 1000 > AGENT_DEAD_MS) return STARTING;
   const logo = str(o.logo, 64);
   const lockKind = LOCK_KINDS.find((k) => k === o.lock_kind) ?? null;
+  const jwt = str(o.attestation, 4096);
   return {
     mode,
     logo: logo && /^\/agent\/logo\.(png|jpg|webp)$/.test(logo) ? logo : null,
@@ -105,6 +215,11 @@ export function parseAgentState(raw: unknown, now = Date.now()): MdmState {
     apps: Array.isArray(o.apps)
       ? o.apps.map(parseApp).filter((a): a is MdmApp => a !== null)
       : [],
+    wifi: parseWifi(o.wifi),
+    unlock: parseUnlock(o.unlock),
+    // Solo con el equipo activo: un equipo bloqueado nunca presenta atestación.
+    attestation: mode === 'active' && jwt && JWT_RE.test(jwt) ? jwt : null,
+    update: parseUpdate(o.update),
   };
 }
 

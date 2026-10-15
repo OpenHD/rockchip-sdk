@@ -59,7 +59,7 @@ export const EVENT_LABELS: Record<string, string> = {
 };
 
 export const DEVICE_COLUMNS =
-  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at' as const;
+  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref' as const;
 
 export interface Device {
   id: string;
@@ -76,7 +76,12 @@ export interface Device {
   reported_lock_kind: string | null;
   reported_at: string | null;
   offline_alerted_at: string | null;
+  /** N.º de cliente del ISP (único por empresa). */
+  external_ref: string | null;
 }
+
+/** Mismo formato que valida la base (mdm_devices.external_ref). */
+export const EXTERNAL_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}$/;
 
 /** El equipo considera "online" si sincronizó en los últimos 5 minutos (sync cada 60 s). */
 export function isOnline(d: Device): boolean {
@@ -102,6 +107,52 @@ export interface CatalogApp {
   icon_url: string | null;
   domains: string[];
   active: boolean;
+  /** Se le pasa al servicio la atestación del equipo (JWT) al abrirlo. */
+  pass_attestation?: boolean;
+}
+
+export interface UnlockCode {
+  code: string;
+  valid_on: string;
+  hours: number;
+}
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Respuesta de mdm_create_api_key: la clave completa solo viaja esta vez. */
+export interface NewApiKey {
+  id: string;
+  key: string;
+  prefix: string;
+}
+
+export interface FirmwareRelease {
+  id: string;
+  version: string;
+  build: number;
+  url: string;
+  sha256: string;
+  size: number;
+  sig: string;
+  notes: string | null;
+  created_at: string;
+}
+
+/** company_id null = target global. */
+export interface FirmwareTarget {
+  company_id: string | null;
+  company_name: string | null;
+  release_id: string;
+  version: string;
+  build: number;
+  updated_at: string;
 }
 
 export interface Member {

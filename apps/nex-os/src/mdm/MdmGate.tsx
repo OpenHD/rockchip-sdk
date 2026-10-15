@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import qrcode from 'qrcode-generator';
+import { KeyRound, Wifi } from 'lucide-react';
 import AppRegistry from '../components/AppRegistry';
-import { useAgentState, type MdmApp, type MdmState } from './agentState';
+import { useAgentState, type MdmApp, type MdmState, type MdmUpdate } from './agentState';
+import { BACK_KEYS, useDpad } from './dpad';
+import { tvButton } from './styles';
+import UnlockCodeScreen from './UnlockCodeScreen';
+import WifiScreen from './WifiScreen';
 
 /**
  * Interfaz del TV box gestionado. Muestra solo lo que nex-agent publica:
@@ -26,8 +31,6 @@ const TV_SAFE_INTERNAL = new Set([
   'nex-games',
 ]);
 
-const BACK_KEYS = new Set(['Escape', 'Backspace', 'BrowserBack', 'GoBack']);
-
 function Brand({ state, size = 'lg' }: { state: MdmState; size?: 'lg' | 'sm' }) {
   // Se recuerda qué logo falló: si la empresa sube otro, se vuelve a intentar.
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
@@ -50,20 +53,32 @@ function Brand({ state, size = 'lg' }: { state: MdmState; size?: 'lg' | 'sm' }) 
   );
 }
 
+/** Pantalla completa navegable con el control remoto (flechas entre sus botones). */
 function FullScreen({ children }: { children: ReactNode }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDpad(rootRef);
   return (
-    <div className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-10 p-12 text-center select-none">
+    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-10 p-12 text-center select-none">
       {children}
     </div>
   );
 }
 
-function StartingScreen({ state }: { state: MdmState }) {
+function WifiButton({ onClick, autoFocus, label = 'Configurar Wi-Fi' }: { onClick: () => void; autoFocus?: boolean; label?: string }) {
+  return (
+    <button autoFocus={autoFocus} className={tvButton} onClick={onClick}>
+      <Wifi className="h-6 w-6" aria-hidden /> {label}
+    </button>
+  );
+}
+
+function StartingScreen({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   return (
     <FullScreen>
       <Brand state={state} />
       <div className="h-10 w-10 rounded-full border-4 border-white/15 border-t-white animate-spin" />
       <p className="text-white/60 text-lg">Iniciando el equipo…</p>
+      <WifiButton onClick={onWifi} autoFocus />
     </FullScreen>
   );
 }
@@ -93,7 +108,7 @@ function claimQr(code: string): string | null {
   return qr.createDataURL(8, 2);
 }
 
-function PairingScreen({ state }: { state: MdmState }) {
+function PairingScreen({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   const expires = state.pairingExpiresAt ? new Date(state.pairingExpiresAt) : null;
   const qr = useMemo(() => (state.pairingCode ? claimQr(state.pairingCode) : null), [state.pairingCode]);
   return (
@@ -115,6 +130,7 @@ function PairingScreen({ state }: { state: MdmState }) {
           </p>
         )}
       </div>
+      <WifiButton onClick={onWifi} autoFocus />
     </FullScreen>
   );
 }
@@ -126,7 +142,11 @@ const LOCK_TITLES: Record<string, string> = {
   offline: 'Equipo sin conexión',
 };
 
-function LockScreen({ state }: { state: MdmState }) {
+function LockScreen({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
+  const [codeOpen, setCodeOpen] = useState(false);
+  // Con el reloj inválido el código (atado al día) no se puede verificar: no se ofrece.
+  const canUseCode = state.lockKind !== 'clock';
+  if (codeOpen && canUseCode) return <UnlockCodeScreen unlock={state.unlock} onClose={() => setCodeOpen(false)} />;
   const title = LOCK_TITLES[state.lockKind ?? 'manual'];
   // Bloqueo manual: mensaje de la empresa + motivo. El resto trae su propio mensaje.
   const message = state.lockKind === 'manual' ? state.lockMessage : state.lockReason;
@@ -139,6 +159,14 @@ function LockScreen({ state }: { state: MdmState }) {
         <h1 className="text-4xl font-semibold">{title}</h1>
         {message && <p className="text-2xl text-white/80 leading-relaxed">{message}</p>}
         {detail && <p className="text-lg text-white/50">{detail}</p>}
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-4">
+        {canUseCode && (
+          <button autoFocus className={tvButton} onClick={() => setCodeOpen(true)}>
+            <KeyRound className="h-6 w-6" aria-hidden /> Tengo un código de desbloqueo
+          </button>
+        )}
+        <WifiButton onClick={onWifi} autoFocus={!canUseCode} />
       </div>
       {state.deviceName && <p className="text-white/30 text-sm">Equipo: {state.deviceName}</p>}
     </FullScreen>
@@ -160,15 +188,24 @@ function formatDue(date: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
 }
 
-function TvHome({ state }: { state: MdmState }) {
+/** URL de lanzamiento: con atestación si la app la pide y el agente tiene una vigente. */
+function launchUrl(app: MdmApp, attestation: string | null): string | null {
+  if (!app.launch_url) return null;
+  if (!app.pass_attestation || !attestation) return app.launch_url;
+  // Va en el fragmento: no viaja en la petición HTTP ni queda en logs del servidor.
+  const sep = app.launch_url.includes('#') ? '&' : '#';
+  return `${app.launch_url}${sep}nex_attestation=${encodeURIComponent(attestation)}`;
+}
+
+function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   const clock = useClock();
   const [selectedApp, setOpenApp] = useState<MdmApp | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const apps = useMemo(
     () => state.apps.filter((a) => a.kind === 'web' || TV_SAFE_INTERNAL.has(a.id)),
     [state.apps],
   );
-  const columns = 4;
 
   // Si la empresa desactiva la app abierta, se cierra.
   const openApp = selectedApp && apps.some((a) => a.id === selectedApp.id) ? selectedApp : null;
@@ -189,26 +226,21 @@ function TvHome({ state }: { state: MdmState }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [openApp]);
 
+  const attestation = state.attestation;
   const launch = useCallback((app: MdmApp) => {
-    if (app.kind === 'web' && app.launch_url) {
+    const url = app.kind === 'web' ? launchUrl(app, attestation) : null;
+    if (url) {
       // Navegación de nivel superior: los servicios de streaming no se dejan embeber.
       // Para volver, el botón "atrás" del control remoto. Chromium filtra los dominios.
-      window.location.assign(app.launch_url);
+      window.location.assign(url);
     } else {
       setOpenApp(app);
     }
-  }, []);
+  }, [attestation]);
 
-  const onGridKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const current = Number((document.activeElement as HTMLElement | null)?.dataset.index ?? -1);
-    if (current < 0) return;
-    const delta: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: columns, ArrowUp: -columns };
-    const step = delta[e.key];
-    if (step === undefined) return;
-    e.preventDefault();
-    const next = Math.min(Math.max(current + step, 0), apps.length - 1);
-    gridRef.current?.querySelector<HTMLButtonElement>(`button[data-index="${next}"]`)?.focus();
-  };
+  // Flechas entre la grilla y el botón de Wi-Fi. Dentro de una app el home no está montado
+  // (rootRef queda en null) y las flechas son de la app.
+  useDpad(rootRef);
 
   if (openApp) {
     return (
@@ -227,10 +259,19 @@ function TvHome({ state }: { state: MdmState }) {
   }
 
   return (
-    <div className="w-screen h-screen bg-gradient-to-b from-[#0b1020] to-[#05070c] text-white flex flex-col select-none">
+    <div ref={rootRef} className="w-screen h-screen bg-gradient-to-b from-[#0b1020] to-[#05070c] text-white flex flex-col select-none">
       <header className="flex items-center justify-between px-16 pt-10">
         <Brand state={state} size="sm" />
-        <span className="text-3xl font-light tabular-nums">{clock}</span>
+        <div className="flex items-center gap-6">
+          <button
+            onClick={onWifi}
+            aria-label="Wi-Fi"
+            className="h-12 w-12 rounded-full bg-white/5 flex items-center justify-center outline-none transition focus:bg-white focus:text-black focus:ring-4 focus:ring-sky-400/70"
+          >
+            <Wifi className="h-6 w-6" aria-hidden />
+          </button>
+          <span className="text-3xl font-light tabular-nums">{clock}</span>
+        </div>
       </header>
 
       {state.paymentDue && (
@@ -243,7 +284,7 @@ function TvHome({ state }: { state: MdmState }) {
         {apps.length === 0 ? (
           <p className="text-white/50 text-xl">Tu proveedor todavía no habilitó aplicaciones en este equipo.</p>
         ) : (
-          <div ref={gridRef} onKeyDown={onGridKey} className="grid grid-cols-4 gap-8 w-full max-w-6xl">
+          <div ref={gridRef} className="grid grid-cols-4 gap-8 w-full max-w-6xl">
             {apps.map((app, i) => (
               <button
                 key={app.id}
@@ -264,19 +305,53 @@ function TvHome({ state }: { state: MdmState }) {
   );
 }
 
-const MdmGate: React.FC = () => {
-  const state = useAgentState();
+const UPDATE_TEXT: Record<MdmUpdate['state'], string> = {
+  downloading: 'Descargando actualización del sistema…',
+  verifying: 'Verificando actualización del sistema…',
+  installing: 'Instalando actualización del sistema… No apagues el equipo.',
+  failed: 'No se pudo actualizar el sistema. Se va a reintentar.',
+};
 
+function UpdateBadge({ update }: { update: MdmUpdate }) {
+  const failed = update.state === 'failed';
+  return (
+    <div
+      role="status"
+      className={`fixed bottom-8 right-8 z-50 flex items-center gap-3 rounded-full px-6 py-3 text-lg shadow-xl backdrop-blur pointer-events-none ${
+        failed ? 'bg-rose-500/20 text-rose-100' : 'bg-white/10 text-white/90'
+      }`}
+    >
+      {!failed && <span className="h-4 w-4 rounded-full border-2 border-white/20 border-t-white animate-spin" aria-hidden />}
+      {UPDATE_TEXT[update.state]}
+      {update.version && <span className="text-white/50">v{update.version}</span>}
+    </div>
+  );
+}
+
+function Screen({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   switch (state.mode) {
     case 'unpaired':
-      return <PairingScreen state={state} />;
+      return <PairingScreen state={state} onWifi={onWifi} />;
     case 'locked':
-      return <LockScreen state={state} />;
+      return <LockScreen state={state} onWifi={onWifi} />;
     case 'active':
-      return <TvHome state={state} />;
+      return <TvHome state={state} onWifi={onWifi} />;
     default:
-      return <StartingScreen state={state} />;
+      return <StartingScreen state={state} onWifi={onWifi} />;
   }
+}
+
+const MdmGate: React.FC = () => {
+  const state = useAgentState();
+  const [wifiOpen, setWifiOpen] = useState(false);
+  const openWifi = useCallback(() => setWifiOpen(true), []);
+
+  return (
+    <>
+      {wifiOpen ? <WifiScreen wifi={state.wifi} onClose={() => setWifiOpen(false)} /> : <Screen state={state} onWifi={openWifi} />}
+      {state.update && <UpdateBadge update={state.update} />}
+    </>
+  );
 };
 
 export default MdmGate;
