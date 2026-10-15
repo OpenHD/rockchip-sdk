@@ -333,3 +333,186 @@ al final de `schema-mdm-v7.sql` (requiere las extensiones `pg_cron` y `pg_net`).
 - QR en la pantalla de vinculación: hoy solo se muestra el código. `src/utils/qr.ts` usa un servicio externo,
   y mandarle el código a un tercero no es aceptable.
 
+
+## v8: configuración firmada, API para ISP y actualizaciones (servidor)
+
+Archivos: `supabase/schema-mdm-v8.sql`, `supabase/functions/mdm-sync`, `supabase/functions/isp-api`,
+`tools/nex-os/keys/gen-mdm-sign-key.sh`, `tools/nex-os/keys/gen-release-key.sh`, `tools/nex-os/release/sign-release.sh`.
+
+### Qué cambia
+
+- **Configuración firmada.** El equipo ya no llama a `rpc/mdm_device_sync` directo sino a la Edge Function
+  `mdm-sync`. Esta llama al RPC con la anon key del equipo y, si está vinculado, devuelve
+  `{"status":"paired","payload":"<JSON>","sig":"<base64>"}`. `sig` es RS256 (RSA-3072) sobre los bytes exactos de
+  `payload`. El equipo lo verifica con `/etc/nex-agent/mdm-sign.pub.pem` y descarta lo que no verifique.
+  El `payload` se escapa a ASCII puro (`\uXXXX`), así el shell del equipo no depende del manejo de UTF-8.
+- **Campos nuevos del sync:** `hardware_id`, que se completa si faltaba; `unlock_secret`; `external_ref`;
+  `attestation_eligible`; `update`; y `pass_attestation` en cada app.
+- **`unlock_secret`.** Es por equipo y se genera al crear el equipo. A los equipos existentes se les genera al
+  aplicar v8. Se renueva si cambia el token (re-enrolamiento por hardware). Ningún admin lo puede leer: solo lo
+  recibe el equipo. El script falla si algún grant lo deja legible.
+- **Código de desbloqueo offline:** `HMAC-SHA256(unlock_secret, "<device_id>:<YYYYMMDD UTC>")`. Se toman los primeros
+  8 hex, se pasan a entero y se aplica `mod 1e8`, con ceros a la izquierda.
+  - Desde el panel se pide con `mdm_unlock_code(p_device)`, y desde la API con `/unlock-code`.
+  - El equipo acepta el código de hoy y el de ayer y desbloquea 72 h.
+  - Queda auditado sin el código. Límite: 30 por hora por usuario y 60 por hora por clave de API.
+- **Atestación.** Es un JWT RS256 firmado con la misma clave MDM. Solo se emite si el equipo no está bloqueado y no
+  tiene el pago vencido.
+  - Claims: `iss: "nex-mdm"`, `aud: "nex-services"`, `sub` (equipo), `cid` (empresa), `ref` (`external_ref`),
+    `st: "active"`. Dura 6 h.
+  - Las apps del catálogo con `pass_attestation` lo reciben en `#nex_attestation=<jwt>`. Lo activa NEX con
+    `mdm_set_catalog_attestation`.
+- **OTA.** NEX publica releases con `mdm_publish_release` y elige un target global o por empresa con
+  `mdm_set_firmware_target`. La empresa con target propio no usa el global, y `p_release = null` borra el target.
+  - El sync ofrece `update` solo si el build del target es mayor que el `build` que informa el equipo (sin `build`
+    cuenta como 0).
+  - La firma del release (`nex-update:v1:<build>:<sha256>`) se hace offline con la clave de releases, que es otra.
+    El servidor solo la guarda.
+  - La URL y la versión aceptan un charset acotado porque el agente es shell.
+- **Claves de API del ISP.** Las crea el owner desde el panel con `mdm_create_api_key`, y la clave se muestra una sola
+  vez. Se revocan con `mdm_revoke_api_key`.
+  - En la base solo queda `sha256(clave)`: `key_hash` no es legible.
+  - Cada acción queda en la auditoría con `actor_label = 'api:<nombre>'`.
+  - Hay un máximo de 10 claves activas por empresa y un rate limit de 120 pedidos por minuto por clave.
+
+### Despliegue
+
+```sh
+# 1. Base: después de v6 y v7
+#    Ejecutar supabase/schema-mdm-v8.sql en el SQL Editor (es idempotente).
+
+# 2. Clave MDM (una sola vez; no pisa claves existentes)
+tools/nex-os/keys/gen-mdm-sign-key.sh ~/nex-keys/mdm
+supabase secrets set NEX_SIGNING_KEY="$(cat ~/nex-keys/mdm/mdm-sign.key.pem)"
+
+# 3. Funciones
+supabase functions deploy mdm-sync                    # con verificación de JWT: el equipo manda la anon key
+supabase functions deploy isp-api --no-verify-jwt     # se autentica con la clave nexk_ del ISP
+```
+
+- `mdm-sign.pub.pem` va al firmware como `/etc/nex-agent/mdm-sign.pub.pem`.
+- La privada se guarda fuera del repo, con backup offline.
+- Si el proyecto usa las claves nuevas (`sb_publishable_...`, que no son JWT), `mdm-sync` también se despliega con
+  `--no-verify-jwt`. El RPC sigue autenticando al equipo por su token.
+- **Rotar la clave MDM** obliga a actualizar la pública en los equipos antes de cambiar el secreto. Si no, rechazan la
+  configuración y siguen con la última válida.
+
+### API para ISP
+
+Base: `https://<proyecto>.supabase.co/functions/v1/isp-api`.
+- **Autenticación:** `Authorization: Bearer nexk_...`.
+- **`<id>`:** el uuid del equipo o `ref:<external_ref>`.
+- **Respuestas:** JSON. Los errores vienen como `{"error": "..."}`.
+- **Códigos HTTP:** 400 dato inválido, 401 clave inválida o revocada, 404 equipo inexistente o de otra empresa,
+  409 referencia ya usada, 413 body grande, 415 sin `Content-Type: application/json`, 429 rate limit (con `Retry-After`).
+- No hay CORS: es una API de servidor a servidor.
+
+| Método y ruta | Body | Respuesta |
+|---|---|---|
+| `GET /jwks` (sin auth) | — | `{"keys":[{kty,n,e,alg:"RS256",use:"sig",kid}]}` |
+| `GET /devices?limit=50&offset=0&ref=` | — | `{"devices":[equipo…],"limit","offset"}` (limit 1–200) |
+| `GET /devices/<id>` | — | equipo |
+| `POST /devices/<id>/lock` | `{"reason"?: "…"}` (≤ 280) | equipo |
+| `POST /devices/<id>/unlock` | — | equipo |
+| `POST /devices/<id>/paid-until` | `{"paid_until": "YYYY-MM-DD" \| null}` | equipo (queda en `mdm_payments`) |
+| `POST /devices/<id>/external-ref` | `{"external_ref": "…" \| null}` | equipo |
+| `POST /devices/<id>/unlock-code` | — | `{"code":"12345678","valid_on":"YYYY-MM-DD","hours":72}` |
+
+- **Equipo:** `{id, name, external_ref, locked, lock_reason, paid_until, online, last_seen_at, reported_mode,
+  reported_lock_kind, firmware_version}`. `online` significa que sincronizó en los últimos 5 minutos.
+- **`external_ref`:** de 1 a 64 caracteres (`A-Z a-z 0-9 . _ : @ -`), único por empresa.
+- Los campos que no están en la tabla se rechazan.
+
+```sh
+API=https://<proyecto>.supabase.co/functions/v1/isp-api
+KEY=nexk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+curl -s "$API/devices?limit=100" -H "Authorization: Bearer $KEY"
+curl -s "$API/devices/ref:ABO-1234" -H "Authorization: Bearer $KEY"
+# Asociar el abonado al equipo (una vez)
+curl -s -X POST "$API/devices/<uuid>/external-ref" -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"external_ref":"ABO-1234"}'
+# Registrar el pago: si ya no hay deuda, el equipo se desbloquea solo en el próximo sync
+curl -s -X POST "$API/devices/ref:ABO-1234/paid-until" -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"paid_until":"2026-11-30"}'
+curl -s -X POST "$API/devices/ref:ABO-1234/lock" -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' -d '{"reason":"Baja del servicio"}'
+curl -s -X POST "$API/devices/ref:ABO-1234/unlock" -H "Authorization: Bearer $KEY"
+# Código para dictar por teléfono a un cliente sin internet
+curl -s -X POST "$API/devices/ref:ABO-1234/unlock-code" -H "Authorization: Bearer $KEY"
+```
+
+### Verificar la atestación en un servicio del ISP
+
+La app recibe el JWT en el fragmento de la URL (`#nex_attestation=<jwt>`). Lo manda a su backend, que lo verifica así:
+
+1. Se baja `GET $API/jwks` y se cachea (unos minutos). La clave se elige por el `kid` del header.
+2. Se exige `alg = RS256` (rechazá `none` o `HS256`) y se verifica la firma.
+3. Se valida `iss = "nex-mdm"`, `aud = "nex-services"`, `exp` vigente (con unos segundos de tolerancia) y
+   `st = "active"`.
+4. Se usa `ref` (el `external_ref`) o `sub` (el uuid del equipo) para vincularlo con el abonado. `cid` es la empresa:
+   comprobá que sea la tuya.
+
+Ejemplo con Node y [`jose`](https://github.com/panva/jose):
+
+```js
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+const JWKS = createRemoteJWKSet(new URL('https://<proyecto>.supabase.co/functions/v1/isp-api/jwks'));
+const { payload } = await jwtVerify(token, JWKS, {
+  algorithms: ['RS256'], issuer: 'nex-mdm', audience: 'nex-services', clockTolerance: 30,
+});
+if (payload.st !== 'active' || payload.cid !== MI_EMPRESA_ID) throw new Error('equipo no habilitado');
+// payload.ref → número de abonado; payload.sub → id del equipo
+```
+
+- El JWT prueba que el equipo estaba al día y desbloqueado hasta hace como mucho 6 h. No prueba quién lo presenta:
+  es un bearer token.
+- Para algo sensible, combinalo con la sesión propia del servicio.
+
+### Publicar una actualización de firmware
+
+1. **Clave de releases** (una sola vez, en una máquina offline; no va a Supabase):
+   `tools/nex-os/keys/gen-release-key.sh /media/usb-cifrado/nex-release`. La pública va al firmware como
+   `/etc/nex-agent/release.pub.pem`.
+2. **Compilar** la imagen con un build entero mayor al anterior (queda en `/etc/nex-os-build`).
+3. **Firmar** offline:
+   ```sh
+   tools/nex-os/release/sign-release.sh update.img 1042 /media/usb-cifrado/nex-release/release.key.pem
+   ```
+   Imprime `sha256`, `size` y `sig`: el base64 de la firma RS256 sobre `nex-update:v1:<build>:<sha256>`. Antes de
+   imprimir, el script verifica la firma con la pública.
+4. **Subir** `update.img` a una URL `https://` estable (bucket o CDN).
+5. **Publicar** desde el panel (Firmware, solo NEX) o con `mdm_publish_release(version, build, url, sha256, size, sig,
+   notas)`. La base no puede verificar la firma; el equipo sí, y descarta el release si no coincide.
+6. **Asignar el target:**
+   - primero a una empresa de prueba: `mdm_set_firmware_target(<empresa>, <release>)`;
+   - después a todos: `mdm_set_firmware_target(null, <release>)`.
+
+El equipo recibe `update` en el siguiente sync. Nunca instala un build menor al suyo: para volver atrás, se publica la
+imagen anterior con un build nuevo.
+
+### Verificado (v8)
+
+- **SQL** (Postgres 16 local con stubs de `auth` y `storage` y los privilegios por defecto de Supabase): v6 → v7 → v8,
+  y v8 corrida dos veces. Pasan 78 pruebas:
+  - Campos nuevos del sync y backfill de `hardware_id` sin duplicar.
+  - Los admins no pueden leer `unlock_secret`, `hardware_id`, `token_hash` ni `key_hash`.
+  - Sin aal2 no hay permisos, y otra empresa no tiene acceso.
+  - Claves de API revocadas o desconocidas.
+  - Las funciones `mdm_isp_*` no se pueden ejecutar como anon ni como authenticated.
+  - `update` solo con un build mayor, con el target de la empresa por encima del global.
+  - Rotación del secreto, rate limits y auditoría `api:<nombre>`.
+- **Código de desbloqueo:** coincide con `openssl dgst -sha256 -hmac` en 10 casos, incluidos los de ceros a la
+  izquierda.
+- **Edge Functions:** no había Deno, así que se probaron con `tsc --strict` y con Node, con un shim de `Deno` y un
+  PostgREST simulado contra la base de prueba.
+  - `payload` y JWT verificados con `openssl dgst -sha256 -verify`.
+  - El `kid` del JWKS es igual al del script.
+  - Validaciones HTTP (400, 401, 404, 405, 409, 413, 415, 429).
+- **Segunda pasada independiente**, con Postgres 16 y pgcrypto real:
+  - 87 pruebas de SQL;
+  - 47 pruebas de las Edge Functions en Node, incluyendo payload ASCII, firma alterada que no verifica, equipo
+    bloqueado sin atestación, clave mal configurada → 500 sin detalles, y JWKS → misma pública;
+  - backfill de `unlock_secret` en equipos existentes;
+  - `sign-release.sh` → `openssl dgst -verify` → `mdm_publish_release` aceptado.
+- **No probado contra un Supabase real** (gateway, `verify_jwt` ni secretos).
