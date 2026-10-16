@@ -1,9 +1,14 @@
--- Pruebas de schema-mdm-v8.sql y v9.sql. Las corre run.sh; cada prueba emite "NOTICE: PASS ..." o "NOTICE: FAIL ...".
+-- Pruebas de schema-mdm-v8.sql, v9.sql y v10.sql. Las corre run.sh; cada prueba emite "NOTICE: PASS ..." o "NOTICE: FAIL ...".
 -- t.as_user(uid, aal) simula el JWT de Supabase; set role anon/authenticated/service_role simula el rol de PostgREST.
 \set QUIET on
 set client_min_messages = notice;
 create schema if not exists t;
-create or replace function t.as_user(p uuid, aal text default 'aal2') returns void language sql as $$ select set_config('request.jwt.claims', json_build_object('sub',p,'aal',aal)::text, false) $$;
+-- totp_age: hace cuánto se ingresó el TOTP (claim "amr" de Supabase); null = sin TOTP. v10 exige < 5 min en acciones críticas.
+drop function if exists t.as_user(uuid, text);
+create or replace function t.as_user(p uuid, aal text default 'aal2', totp_age interval default interval '1 minute') returns void language sql as $$
+  select set_config('request.jwt.claims', json_build_object('sub', p, 'aal', aal,
+    'amr', case when totp_age is null then '[]'::json
+                else json_build_array(json_build_object('method', 'totp', 'timestamp', extract(epoch from now() - totp_age)::bigint)) end)::text, false) $$;
 create or replace function t.ok(name text, cond boolean) returns void language plpgsql as $$ begin raise notice '% %', case when cond then 'PASS' else 'FAIL' end, name; end $$;
 create or replace function t.err(name text, q text, code text) returns void language plpgsql as $$
 begin
@@ -450,3 +455,41 @@ select mdm_purge_old_events();
 reset role;
 delete from mdm_devices where id = 'dddddddd-0000-0000-0000-000000000001';
 select t.ok('historial en cascada', not exists (select 1 from mdm_device_state_log where device_id = 'dddddddd-0000-0000-0000-000000000001'));
+
+-- ---------- v10: verificación reforzada (2FA reciente) ----------
+-- Dueño con TOTP de hace 10 minutos: las acciones críticas piden el código de nuevo (P0401).
+select t.as_user('11111111-1111-1111-1111-111111111111', 'aal2', interval '10 minutes');
+set role authenticated;
+select t.err('v10: crear clave de API sin 2FA reciente', $q$select mdm_create_api_key('aaaaaaaa-0000-0000-0000-000000000001','x10')$q$, 'P0401');
+select t.err('v10: revocar clave sin 2FA reciente', $q$select mdm_revoke_api_key((select id from mdm_api_keys where revoked_at is null limit 1))$q$, 'P0401');
+select t.err('v10: cambiar avisos sin 2FA reciente', $q$select mdm_update_alerts('aaaaaaaa-0000-0000-0000-000000000001', null, '{}', 24, '{}', false)$q$, 'P0401');
+-- Lo cotidiano no pide el código: bloquear, código de desbloqueo.
+select t.ok('v10: código de desbloqueo sin pedir 2FA otra vez', (select mdm_unlock_code((select id from mdm_devices where company_id = 'aaaaaaaa-0000-0000-0000-000000000001' limit 1)) ? 'code'));
+reset role;
+select t.as_user('11111111-1111-1111-1111-111111111111', 'aal2', null);
+set role authenticated;
+select t.err('v10: sin claim amr también pide el código', $q$select mdm_create_api_key('aaaaaaaa-0000-0000-0000-000000000001','x10')$q$, 'P0401');
+reset role;
+select t.as_user('11111111-1111-1111-1111-111111111111');
+set role authenticated;
+select t.ok('v10: con 2FA reciente crea la clave', mdm_create_api_key('aaaaaaaa-0000-0000-0000-000000000001','Reciente') ? 'key');
+reset role;
+delete from mdm_api_rate;
+
+-- Super admin: firmware, catálogo y atestación.
+select t.as_user('33333333-3333-3333-3333-333333333333', 'aal2', interval '10 minutes');
+set role authenticated;
+select t.err('v10: publicar firmware sin 2FA reciente', $q$select mdm_publish_release('9.9', 999, 'https://x.com/b.img', repeat('b',64), 100, repeat('A',512))$q$, 'P0401');
+select t.err('v10: target de firmware sin 2FA reciente', $q$select mdm_set_firmware_target(null, null)$q$, 'P0401');
+select t.err('v10: atestación sin 2FA reciente', $q$select mdm_set_catalog_attestation('netflix', true)$q$, 'P0401');
+select t.err('v10: catálogo sin 2FA reciente', $q$select mdm_upsert_catalog_app('x10', 'X', 'web', 'https://x10.com', null, array['x10.com'], true)$q$, 'P0401');
+select t.err('v10: clasificar dominio sin 2FA reciente', $q$select mdm_classify_domain('pirata10.com', 'pirateria')$q$, 'P0401');
+select t.err('v10: crear empresa sin 2FA reciente', $q$select mdm_create_company('Nueva', 'owner@a.com')$q$, 'P0401');
+reset role;
+select t.as_user('33333333-3333-3333-3333-333333333333');
+set role authenticated;
+select t.ok('v10: con 2FA reciente publica firmware', mdm_publish_release('9.9', 999, 'https://x.com/b.img', repeat('b',64), 100, repeat('A',512)) is not null);
+reset role;
+select t.ok('v10: _mdm_require_recent_mfa no ejecutable por clientes',
+  not has_function_privilege('authenticated', 'public._mdm_require_recent_mfa(interval)', 'execute')
+  and not has_function_privilege('anon', 'public._mdm_require_recent_mfa(interval)', 'execute'));

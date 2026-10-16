@@ -42,6 +42,7 @@ import {
 } from '../api';
 import { FILTERS, healthIssues, paymentText, SERVICE_STAGES, STATE_SOURCE_LABELS, STATUS_META, type Filter } from '../deviceMeta';
 import { addMonths, copyText, formatDate, formatUptime, LOCK_REASONS, relativeTime, RESTRICT_REASONS, todayIso } from '../format';
+import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
 import {
   Badge,
@@ -308,6 +309,7 @@ function RenameModal({ device, onClose, onDone }: { device: Device; onClose: () 
 function UnpairModal({ device, onClose, onDone }: { device: Device; onClose: () => void; onDone: () => void }) {
   const [confirm, setConfirm] = useState('');
   const { busy, error, exec } = useAction(onDone);
+  const stepUp = useStepUp();
   const expected = 'DESVINCULAR';
   return (
     <Modal
@@ -322,7 +324,7 @@ function UnpairModal({ device, onClose, onDone }: { device: Device; onClose: () 
             icon={Unlink}
             disabled={busy || confirm !== expected}
             onClick={() =>
-              exec(() => run(db().rpc('mdm_unpair_device', { p_device: device.id })), 'Equipo desvinculado').then((ok) => ok && onClose())
+              exec(() => stepUp.guard(() => run(db().rpc('mdm_unpair_device', { p_device: device.id }))), 'Equipo desvinculado').then((ok) => ok && onClose())
             }
           >
             Desvincular

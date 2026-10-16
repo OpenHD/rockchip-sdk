@@ -16,6 +16,10 @@ interface ImportMetaEnv {
   readonly VITE_NEX_MDM?: string;
   /** URL https del panel (/admin) para el QR de vinculación del TV. */
   readonly VITE_NEX_ADMIN_URL?: string;
+  /** '1' muestra "Crear cuenta" en el panel. Por defecto las cuentas se crean por invitación. */
+  readonly VITE_NEX_ADMIN_SIGNUP?: string;
+  /** Site key de Cloudflare Turnstile: activa el captcha en el login del panel. */
+  readonly VITE_TURNSTILE_SITE_KEY?: string;
 }
 
 interface ImportMeta {

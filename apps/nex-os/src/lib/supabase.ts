@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-function readSupabaseEnv() {
+export function readSupabaseEnv() {
   // VITE_SUPABASE_* es el nombre correcto. VITE_SUPBASE_* cubre el typo frecuente en Vercel.
   const url =
     import.meta.env.VITE_SUPABASE_URL ||

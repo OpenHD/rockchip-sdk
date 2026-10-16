@@ -283,11 +283,67 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 Después, programar `?job=tick` cada minuto y `?job=digest` una vez por día con el bloque `cron.schedule` que está
 al final de `schema-mdm-v7.sql` (requiere las extensiones `pg_cron` y `pg_net`).
 
+### Seguridad del panel (`/admin`)
+
+**Identidad y permisos.**
+- Toda acción de administración exige sesión con segundo factor (`aal2`); los usuarios anónimos nunca son admin.
+- **Verificación reforzada** (`supabase/schema-mdm-v10.sql`): estas acciones exigen que el código TOTP se haya
+  ingresado hace menos de 5 minutos.
+  - Desvincular equipos, cambiar miembros y crear o revocar claves de API (lo que solo puede hacer el dueño).
+  - Crear empresas, editar el catálogo, clasificar dominios, publicar firmware, elegir su target y pasar la
+    atestación a una app (lo que solo puede hacer NEX).
+  - Cambiar a dónde llegan los avisos.
+
+  Así, un token robado no alcanza para estas acciones. El servidor lo verifica con el claim `amr` del JWT y responde
+  `P0401`; el panel pide el código y reintenta. Cinco códigos incorrectos seguidos cierran la sesión.
+- Las acciones de uso diario (bloquear, registrar pagos, habilitar apps, vincular) no piden código extra.
+  Todas quedan en la auditoría.
+
+**Sesión.**
+- Cliente de Supabase propio del panel, con la sesión en `sessionStorage`: no se comparte con NEX Music
+  (que usa sesiones anónimas en `localStorage`) y se borra al cerrar la pestaña.
+- Se cierra sola tras 15 minutos sin actividad, con aviso 60 segundos antes.
+- "Cerrar en todos los dispositivos" revoca las sesiones de todos los navegadores.
+
+**Login.**
+- Mensaje genérico ante error (no revela si el email existe) y espera progresiva en el navegador desde el 3.er
+  intento fallido. El límite real lo pone Supabase Auth por IP.
+- Captcha opcional: compilar con `VITE_TURNSTILE_SITE_KEY` y activar Turnstile en Supabase.
+- Sin registro público: las cuentas se crean por invitación. `VITE_NEX_ADMIN_SIGNUP=1` lo vuelve a mostrar.
+
+**Navegador** (`vercel.json`).
+- CSP estricta: solo scripts propios y Turnstile, conexiones solo a Supabase, sin `object`, `base-uri` ni workers.
+- Anti-clickjacking: `frame-ancestors 'none'` y `X-Frame-Options: DENY`. Si el hosting no envía esas cabeceras,
+  el panel igual se niega a dibujarse dentro de un iframe.
+- Además: HSTS, `nosniff`, `no-referrer`, COOP/CORP, `Permissions-Policy` (sin cámara, micrófono ni ubicación)
+  y `no-store`.
+- El service worker de NEX Music no guarda el panel en caché.
+
+**Superficie.**
+- El panel no se incluye en la imagen del TV box.
+- Logos solo PNG/JPG/WEBP de hasta 1 MB, validados por su firma.
+- React escapa todo el texto.
+
+**Configuración en Supabase (obligatoria antes de producción):**
+
+| Dónde | Qué |
+|---|---|
+| Authentication → Sign In / Providers | Desactivar "Allow new users to sign up" (invitar desde *Users → Invite*) y "Anonymous sign-ins" si el proyecto es solo del MDM |
+| Authentication → Multi-Factor | TOTP activado |
+| Authentication → Attack Protection | Captcha (Turnstile), protección de contraseñas filtradas y largo mínimo 12 |
+| Authentication → Sessions | Expiración del JWT en 10 minutos; si el plan lo permite, límite de sesión (ej. 12 h) e inactividad (ej. 30 min) |
+| Authentication → Rate Limits | Bajar los intentos de login y verificación por IP |
+| Authentication → URL Configuration | Site URL y redirects solo hacia el dominio del panel |
+
+**Recomendación de despliegue:** servir el panel en un subdominio propio (ej. `admin.tu-dominio.com`), separado de
+NEX Music. Así, un fallo de seguridad en la app pública no comparte origen con el panel.
+
 ### Puesta en marcha
 
 1. **Supabase**
-   - Ejecutar `supabase/schema-mdm-v6.sql` y después `supabase/schema-mdm-v7.sql`.
-   - Activar MFA TOTP en *Authentication → Multi-Factor*.
+   - Ejecutar en orden `supabase/schema-mdm-v6.sql`, `schema-mdm-v7.sql`, `schema-mdm-v8.sql`, `schema-mdm-v9.sql` y
+     `schema-mdm-v10.sql`.
+   - Aplicar la configuración de "Seguridad del panel" (MFA, sin registro público, captcha, sesiones).
    - Crear la cuenta de NEX y agregarla a `mdm_super_admins` (instrucción al final del script).
 2. **Firmware**
    - Agregar `nex-mdm.config` a `RK_KERNEL_CFG_FRAGMENTS`.

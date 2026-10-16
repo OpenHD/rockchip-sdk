@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getSupabase, getSupabaseErrorMessage } from '../lib/supabase';
+import { getSupabaseErrorMessage } from '../lib/supabase';
+import { getAdminSupabase } from './supabaseAdmin';
 
 export interface Company {
   id: string;
@@ -214,15 +215,25 @@ export const LOGO_TYPES: Record<string, string> = {
 };
 
 export function db(): SupabaseClient {
-  const client = getSupabase();
+  const client = getAdminSupabase();
   if (!client) throw new Error('Supabase no configurado (VITE_SUPABASE_URL / KEY)');
   return client;
 }
 
 /** Ejecuta una consulta y convierte el error de Supabase en Error con mensaje legible. */
+/** Error de Supabase con su código (ej. P0401 = hace falta confirmar el segundo factor). */
+export class ApiError extends Error {
+  readonly code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/** Ejecuta una consulta y convierte el error de Supabase en ApiError con mensaje legible. */
 export async function run<T>(query: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
   const { data, error } = await query;
-  if (error) throw new Error(getSupabaseErrorMessage(error));
+  if (error) throw new ApiError(getSupabaseErrorMessage(error), (error as { code?: string }).code);
   return data as T;
 }
 
