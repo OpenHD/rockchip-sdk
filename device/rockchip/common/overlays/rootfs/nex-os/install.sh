@@ -15,6 +15,30 @@ cp -a "$SOURCE_DIR/www" "$TARGET_DIR/opt/nex-os/"
 cp "$SOURCE_DIR/S99nex-os" "$TARGET_DIR/etc/init.d/S99nex-os"
 cp "$SOURCE_DIR/nex-os.default" "$TARGET_DIR/etc/default/nex-os"
 chmod 0755 "$TARGET_DIR/etc/init.d/S99nex-os"
+# zram y ajustes de memoria para equipos de 1 GB (ver S05nex-memory).
+install -m 0755 "$SOURCE_DIR/S05nex-memory" "$TARGET_DIR/etc/init.d/S05nex-memory"
+
+# Weston lee órdenes en caliente (apagar/prender la pantalla) de este archivo.
+mkdir -p "$TARGET_DIR/etc/profile.d"
+echo 'export WESTON_DRM_CONFIG=/tmp/.weston_drm.conf' > "$TARGET_DIR/etc/profile.d/nex-weston.sh"
+
+# 1080p como máximo: en un TV 4K weston elegiría 3840x2160 y cada buffer de pantalla
+# pasaría de 8 a 33 MB, con la Mali-450 componiendo 4 veces más píxeles. Si el TV no
+# tiene ese modo, weston usa el preferido.
+WESTON_INI="$TARGET_DIR/etc/xdg/weston/weston.ini"
+if [ -f "$WESTON_INI" ] && ! grep -q '^name=HDMI-A-1$' "$WESTON_INI"; then
+	printf '\n[output]\nname=HDMI-A-1\nmode=1920x1080\n' >> "$WESTON_INI"
+fi
+
+# Tecla power: pantalla on/off en vez de suspender (ver nex-power-key.sh).
+if [ -d "$TARGET_DIR/etc/input-event-daemon.conf.d" ]; then
+	install -D -m 0755 "$SOURCE_DIR/nex-power-key.sh" "$TARGET_DIR/usr/bin/nex-power-key.sh"
+	cat > "$TARGET_DIR/etc/input-event-daemon.conf.d/power-key.conf" <<'CONF'
+[Keys]
+*POWER:1      = /usr/bin/nex-power-key.sh press
+*POWER:0      = /usr/bin/nex-power-key.sh release
+CONF
+fi
 
 [ "${RK_NEX_MDM:-}" ] || exit 0
 

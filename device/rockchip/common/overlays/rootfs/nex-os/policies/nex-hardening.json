@@ -24,5 +24,10 @@
   "AudioCaptureAllowed": false,
   "VideoCaptureAllowed": false,
   "AutoplayAllowed": true,
-  "TaskManagerEndProcessEnabled": false
+  "TaskManagerEndProcessEnabled": false,
+  "HomepageLocation": "http://127.0.0.1:8080/",
+  "HomepageIsNewTabPage": false,
+  "NewTabPageLocation": "http://127.0.0.1:8080/",
+  "RestoreOnStartup": 4,
+  "RestoreOnStartupURLs": ["http://127.0.0.1:8080/"]
 }

@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -861,4 +859,16 @@ button:active {
   button {
     border: 1px solid var(--border-color) !important;
   }
+}
+/*
+ * TV box (build MDM): todo el tamaño sale de rem, así que se escala la raíz con el alto
+ * de pantalla. 1080p = 16px, 720p ≈ 10.7px: las pantallas entran igual en los dos.
+ */
+html.nex-tv {
+  font-size: clamp(10px, calc(100vh / 67.5), 24px);
+}
+
+/* Margen de overscan (~5%): muchas TVs recortan los bordes de la imagen. */
+.tv-safe {
+  padding: 5vh 5vw;
 }

@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@fluentui/react-icons": "^2.0.322",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/outfit": "^5.2.8",
     "@monaco-editor/react": "^4.7.0",
     "@nex-os/sdk": "*",
     "@react-three/drei": "^10.7.7",

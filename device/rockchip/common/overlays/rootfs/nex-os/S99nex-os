@@ -33,10 +33,29 @@ wayland_socket() {
 	return 1
 }
 
+# Flags para equipos de poca RAM (TV box de 1 GB). NEX_LOWMEM=0/1 fuerza; por
+# defecto se activa con menos de 1.5 GB.
+lowmem_flags() {
+	mem_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+	case "${NEX_LOWMEM:-auto}" in
+	0) return ;;
+	auto) [ "${mem_mb:-0}" -lt 1536 ] || return ;;
+	esac
+	# Modo de equipo de gama baja: cachés, tiles de raster y memoria descartable más chicos.
+	# V8 prioriza tamaño sobre velocidad. Sin back/forward cache (deja páginas
+	# enteras en RAM) ni renderer de reserva. Nada de tráfico de fondo (traducción,
+	# variaciones, componentes): en un kiosk no sirve y cada servicio es un proceso más.
+	echo --enable-low-end-device-mode --js-flags=--optimize-for-size \
+		--disable-features=BackForwardCache,SpareRendererForSitePerProcess,Translate,MediaRouter,OptimizationHints \
+		--disable-background-networking --disable-component-update
+}
+
 run_chromium() {
 	sock=$1
+	# shellcheck disable=SC2046 # lowmem_flags devuelve flags sin espacios internos
 	set -- --ozone-platform=wayland --enable-wayland-ime --no-first-run \
 		--disable-session-crashed-bubble --user-data-dir="$UI_HOME/chromium" \
+		--disk-cache-size=52428800 $(lowmem_flags) \
 		--kiosk http://127.0.0.1:8080/
 	if [ "$UI_USER" = root ]; then
 		WAYLAND_DISPLAY=$sock chromium "$@"
@@ -64,8 +83,14 @@ case "$1" in
 			busybox httpd -f -p 127.0.0.1:8080 -h /opt/nex-os/www -u "$WWW_USER" \
 				>/run/nex-os/httpd.log 2>&1 &
 		fi
+		echo -900 > "/proc/$!/oom_score_adj" 2>/dev/null
 		(
 			until sock=$(wayland_socket); do sleep 1; done
+			# Si falta memoria, el OOM mata primero Chromium (que se relanza solo),
+			# nunca el compositor ni el servidor de la UI.
+			for pid in $(pidof weston); do
+				echo -900 > "/proc/$pid/oom_score_adj" 2>/dev/null
+			done
 			# nex-agent cierra Chromium para aplicar un bloqueo; se relanza solo.
 			while :; do
 				run_chromium "$sock"

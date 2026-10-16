@@ -923,6 +923,8 @@ report_mode_change() {
 }
 
 main() {
+	# El bloqueo no puede caerse por falta de memoria: el OOM elige antes a Chromium.
+	echo -900 > /proc/self/oom_score_adj 2>/dev/null || true
 	mkdir -p "$STATE_DIR" "$RUN_DIR" "$PUBLIC_DIR"
 	chmod 0700 "$STATE_DIR"
 	for bin in jq curl openssl; do

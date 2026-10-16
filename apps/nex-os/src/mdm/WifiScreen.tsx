@@ -174,7 +174,7 @@ function NetworkList({
   const stateLabel = wifi?.state ? STATE_LABELS[wifi.state] ?? wifi.state : 'Sin datos';
 
   return (
-    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col gap-8 px-16 py-12 select-none">
+    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col gap-8 tv-safe select-none">
       <header className="flex items-center gap-6">
         <button autoFocus className={tvButton} onClick={onClose}>
           <ArrowLeft className="h-6 w-6" aria-hidden /> Volver
@@ -219,7 +219,7 @@ function NetworkList({
         <section className="flex-1 min-w-0 flex flex-col gap-3">
           <h2 className="text-xl text-white/60">Redes disponibles</h2>
           {list.length === 0 ? (
-            <p className="text-white/50 text-lg">{scanning ? 'Buscando redes…' : 'No se encontraron redes. Probá buscar de nuevo.'}</p>
+            <p className="text-white/60 text-lg">{scanning ? 'Buscando redes…' : 'No se encontraron redes. Probá buscar de nuevo.'}</p>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-2">
               {list.map((n) => {
@@ -287,14 +287,14 @@ function PasswordEntry({ ssid, onCancel, onSubmit }: { ssid: string; onCancel: (
   });
 
   return (
-    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-8 p-12 select-none">
+    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-8 tv-safe select-none">
       <div className="text-center">
         <p className="text-xl text-white/60">Contraseña de la red</p>
         <h1 className="text-4xl font-semibold mt-1">{ssid}</h1>
       </div>
       <div className="flex items-center gap-4">
         <div className="w-[40rem] min-h-16 rounded-2xl border-2 border-sky-400/60 bg-white/5 px-6 py-4 font-mono text-3xl tracking-wider break-all">
-          {psk.length === 0 ? <span className="text-white/30">Escribí la contraseña</span> : show ? psk : '•'.repeat(psk.length)}
+          {psk.length === 0 ? <span className="text-white/50">Escribí la contraseña</span> : show ? psk : '•'.repeat(psk.length)}
           <span className="ml-1 inline-block w-0.5 h-8 align-middle bg-sky-400 animate-pulse" aria-hidden />
         </div>
         <button className={tvButton} onClick={() => setShow((s) => !s)}>
@@ -302,7 +302,7 @@ function PasswordEntry({ ssid, onCancel, onSubmit }: { ssid: string; onCancel: (
           {show ? 'Ocultar' : 'Mostrar'}
         </button>
       </div>
-      <p className={`text-lg ${hint ? 'text-rose-300' : 'text-white/50'}`}>
+      <p className={`text-lg ${hint ? 'text-rose-300' : 'text-white/60'}`}>
         {hint ?? `${psk.length} caracteres · mínimo 8`}
       </p>
       <OnScreenKeyboard
