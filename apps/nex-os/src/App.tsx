@@ -12,9 +12,6 @@ import { ClipboardHistoryProvider } from './context/ClipboardHistoryContext';
 import ClipboardHistoryPanel from './components/system/ClipboardHistoryPanel';
 import SnippingOverlay from './components/system/SnippingOverlay';
 import { useNexPhoneShell } from './hooks/useMobileAppShell';
-import { isMdmBuild } from './mdm/agentState';
-
-const MdmGate = lazy(() => import('./mdm/MdmGate'));
 
 const OffScreen = lazy(() => import('./components/system/OffScreen'));
 const BootScreen = lazy(() => import('./components/system/BootScreen'));
@@ -138,16 +135,6 @@ function AppContent() {
 }
 
 function App() {
-  if (isMdmBuild) {
-    // TV box gestionado: sin escritorio, solo lo que habilita la empresa. Sin los
-    // providers del escritorio (música, archivos, runtime): las apps que muestra el TV
-    // no los usan y en un equipo de 1 GB la RAM no sobra.
-    return (
-      <Suspense fallback={<ScreenFallback />}>
-        <MdmGate />
-      </Suspense>
-    );
-  }
   return (
     <SettingsProvider>
       <MusicPlayerProvider>

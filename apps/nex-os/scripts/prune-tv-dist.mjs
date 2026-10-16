@@ -36,11 +36,21 @@ while (queue.length) {
 
 let freed = 0;
 let removed = 0;
-for (const name of assets) {
-  if (keep.has(name)) continue;
-  const p = path.join(assetsDir, name);
+const remove = (p) => {
   freed += fs.statSync(p).size;
   fs.rmSync(p);
   removed++;
+};
+for (const name of assets) if (!keep.has(name)) remove(path.join(assetsDir, name));
+
+// Archivos sueltos de public/ (fondos del escritorio, wasm de otras apps...): solo si
+// algo de lo alcanzado los nombra.
+const reached = [path.join(dist, 'index.html'), ...[...keep].map((n) => path.join(assetsDir, n))]
+  .filter((f) => textual.test(f))
+  .map((f) => fs.readFileSync(f, 'utf8'))
+  .join('\n');
+for (const entry of fs.readdirSync(dist, { withFileTypes: true })) {
+  if (!entry.isFile() || entry.name === 'index.html' || reached.includes(entry.name)) continue;
+  remove(path.join(dist, entry.name));
 }
 console.log(`prune-tv-dist: ${keep.size} assets conservados, ${removed} quitados (${(freed / 1048576).toFixed(1)} MB)`);

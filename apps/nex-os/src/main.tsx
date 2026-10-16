@@ -1,6 +1,3 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { registerSW } from 'virtual:pwa-register'
 // Fuentes empaquetadas: en el TV box el filtro de dominios bloquea Google Fonts.
 import '@fontsource/inter/latin-400.css'
 import '@fontsource/inter/latin-500.css'
@@ -11,19 +8,12 @@ import '@fontsource/outfit/latin-500.css'
 import '@fontsource/outfit/latin-600.css'
 import '@fontsource/outfit/latin-700.css'
 import './index.css'
-import './community-apps'
-import App from './App.tsx'
 import { isMdmBuild } from './mdm/agentState'
 
+// isMdmBuild es constante de build: cada build empaqueta solo su rama. En el TV box
+// (1 GB de RAM) no se descarga ni se parsea el escritorio (three.js, git, motion...).
 if (isMdmBuild) {
-  // TV box: escala por alto de pantalla (index.css) y sin service worker (vite.config.ts).
-  document.documentElement.classList.add('nex-tv')
+  void import('./mdm/tv')
 } else {
-  registerSW({ immediate: true })
+  void import('./desktop')
 }
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)

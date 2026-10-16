@@ -2,7 +2,9 @@
 # DTS base: A95X Z2 (RK3318). Otros modelos necesitan su propio DTS: copiar este
 # y ajustar Wi-Fi, LED, IR y eMMC según el DTB original del equipo.
 RK_KERNEL_DTS_NAME="rk3318-a95x-z2"
-RK_KERNEL_CFG_FRAGMENTS="nex-mdm.config"
+RK_KERNEL_CFG_FRAGMENTS="nex-mdm.config nex-lowmem.config"
+# Rootfs liviano para 1 GB (buildroot/configs/rockchip_rk3328_nex_defconfig).
+RK_BUILDROOT_BASE_CFG="rk3328_nex"
 # Rootfs de 3 GiB: en un eMMC de 8 GB deja ~3.8 GiB en userdata, donde nex-agent
 # descarga el update.img completo de una OTA (el parameter.txt de la EVB deja <1 GiB).
 RK_PARAMETER="parameter-nex.txt"

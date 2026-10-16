@@ -99,6 +99,13 @@ Antes de flashear un lote, con **un** equipo y la imagen de desarrollo:
 - [ ] Wi-Fi o Ethernet funcionan. El agente sincroniza: el equipo aparece en el panel tras vincularlo.
 - [ ] El control remoto mueve el foco (flechas), abre apps (OK) y vuelve (atrás).
 - [ ] Sale video y audio por HDMI.
+- [ ] Memoria (equipos de 1 GB), por consola serie o ADB con la imagen de desarrollo:
+      - `cat /proc/swaps` muestra `/dev/zram0` y `cat /sys/block/zram0/comp_algorithm` marca `[lz4]`.
+      - Con un video de YouTube 1080p reproduciéndose 10 minutos: `free -m` deja más de 100 MB
+        disponibles, `dmesg | grep -i oom` no muestra nada y `top` muestra la CPU lejos del 100 %
+        (si está al 100 %, el video no va por hardware: revisar `/dev/mpp_service` y `/dev/video-dec0`).
+      - `procrank` para ver qué proceso ocupa más.
+      - En un TV 4K, `weston` usa 1920x1080 (no 3840x2160).
 - [ ] Netflix, YouTube y las demás apps habilitadas reproducen. Si Netflix no reproduce, falta Widevine:
       no venderlo para ese modelo.
 - [ ] En el panel, pestaña **Equipos**: no aparece la alerta "⚠ filtro DNS caído / sin firewall".
@@ -175,3 +182,4 @@ Android. Para restaurar uno: `upgrade_tool WL 0 backups/original-….img` con el
 | El control remoto no responde | Mapa de teclas IR distinto | Ajustar el DTS con el `original.dts` (paso 1) |
 | "⚠ filtro DNS caído / sin firewall" en el panel | Kernel sin el fragmento `nex-mdm.config` | Recompilar con el perfil `rockchip_rk3328_nex_tvbox_defconfig` |
 | "Imagen sin modo TV cerrado" | Se instaló la imagen de desarrollo | Reflashear con la de producción |
+| Chromium se cierra solo (vuelve al inicio) durante un video | Sin memoria: el OOM lo mató | `dmesg \| grep -i oom`; revisar que zram esté activo (`cat /proc/swaps`) y que el video vaya por hardware |

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
+const isTvBuild = process.env.VITE_NEX_MDM === '1'
 
 // https://vite.dev/config/
 // Proxy: durante `npm run dev`, las llamadas a /api/* se reenvían al servidor
@@ -50,23 +51,27 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: {
-      input: {
-        main: './index.html',
-        spotify: './nex-music.html',
-        docs: './docs.html',
-        admin: './admin.html',
-      },
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('three') || id.includes('@react-three')) return 'three';
-            if (id.includes('isomorphic-git') || id.includes('buffer')) return 'git';
-            if (id.includes('framer-motion')) return 'motion';
-          }
+    // TV box: solo la UI del TV y sin chunks manuales. Agrupar three/git/motion hace que
+    // el bundler meta módulos compartidos (React) en esos chunks y el TV los precargue.
+    rollupOptions: isTvBuild
+      ? { input: { main: './index.html' } }
+      : {
+          input: {
+            main: './index.html',
+            spotify: './nex-music.html',
+            docs: './docs.html',
+            admin: './admin.html',
+          },
+          output: {
+            manualChunks(id) {
+              if (id.includes('node_modules')) {
+                if (id.includes('three') || id.includes('@react-three')) return 'three';
+                if (id.includes('isomorphic-git') || id.includes('buffer')) return 'git';
+                if (id.includes('framer-motion')) return 'motion';
+              }
+            },
+          },
         },
-      },
-    },
   },
   plugins: [
     react(),
@@ -90,7 +95,7 @@ export default defineConfig({
     VitePWA({
       // TV box (VITE_NEX_MDM=1): sin service worker ni precache. La UI ya está en el equipo
       // y precachear el escritorio entero gasta disco y RAM que el TV no tiene.
-      disable: process.env.VITE_NEX_MDM === '1',
+      disable: isTvBuild,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons.svg', 'robots.txt'],
       manifest: {

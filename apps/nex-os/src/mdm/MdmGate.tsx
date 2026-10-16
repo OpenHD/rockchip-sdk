@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { KeyRound, Lock, Phone, Wifi } from 'lucide-react';
-import AppRegistry from '../components/AppRegistry';
 import { useAgentState, type MdmApp, type MdmPayment, type MdmState, type MdmUpdate } from './agentState';
 import { FOCUSABLE_ANY, useDpad } from './dpad';
 import { launchUrl, localQr } from './launch';
 import { tvButton } from './styles';
+import { isTvApp, TvApp } from './tvApps';
 import UnlockCodeScreen from './UnlockCodeScreen';
 import WifiScreen from './WifiScreen';
 
@@ -13,20 +13,6 @@ import WifiScreen from './WifiScreen';
  * espera, vinculación, bloqueo, restringido (home con las apps deshabilitadas) o el home.
  * El bloqueo real lo aplican el agente y las políticas de Chromium; esta capa es la cara visible.
  */
-
-/**
- * Apps internas que pueden mostrarse en modo TV. Terminal, navegador libre, NEX Code, ajustes, etc. nunca.
- * Solo las que andan sin internet y sin el escritorio: el filtro DNS bloquea lo que usan
- * reproductor/Spotify/fotos (youtube, i.ytimg, scdn, unsplash), el visor de imágenes no tiene
- * archivos y Juegos abre ventanas del escritorio, que en el TV no existe.
- */
-const TV_SAFE_INTERNAL = new Set([
-  'calculator',
-  'clock',
-  'calendar',
-  'tetris',
-  'nex-tetris',
-]);
 
 function Brand({ state, size = 'lg' }: { state: MdmState; size?: 'lg' | 'sm' }) {
   // Se recuerda qué logo falló: si la empresa sube otro, se vuelve a intentar.
@@ -220,7 +206,7 @@ function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
   const appRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
   const apps = useMemo(
-    () => state.apps.filter((a) => a.kind === 'web' || TV_SAFE_INTERNAL.has(a.id)),
+    () => state.apps.filter((a) => a.kind === 'web' || isTvApp(a.id)),
     [state.apps],
   );
 
@@ -275,8 +261,9 @@ function TvHome({ state, onWifi }: { state: MdmState; onWifi: () => void }) {
             ← Volver
           </button>
         </div>
-        <div className="flex-1 min-h-0">
-          <AppRegistry appId={openApp.id} />
+        {/* Margen de overscan también abajo y a los costados: la app no se recorta. */}
+        <div className="flex-1 min-h-0 px-[5vw] pb-[5vh]">
+          <TvApp appId={openApp.id} />
         </div>
       </div>
     );
