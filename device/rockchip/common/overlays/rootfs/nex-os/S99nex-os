@@ -1,0 +1,103 @@
+#!/bin/sh
+
+[ -r /etc/default/nex-os ] && . /etc/default/nex-os
+
+# En imágenes endurecidas el kiosk no se puede desactivar.
+[ -e /etc/nex-os-hardened ] && RK_NEX_OS=1
+
+MANAGED=/etc/chromium/policies/managed
+RUN_POLICIES=/run/nex-policies
+# Usuarios sin privilegios (los crea install.sh en imágenes con gestión remota).
+UI_USER=${NEX_UI_USER:-root}
+WWW_USER=${NEX_WWW_USER:-root}
+UI_HOME=/userdata/nex-ui
+
+# Las políticas que escribe nex-agent viven en tmpfs: en cada arranque se parte
+# de las de la imagen (fallo-cerrado). Si el montaje falla, Chromium usa las de
+# la imagen y el equipo queda en la lista mínima: falla cerrado igual.
+mount_policies() {
+	[ -x /usr/bin/nex-agent ] && [ -d "$MANAGED" ] || return 0
+	mountpoint -q "$MANAGED" && return 0
+	rm -rf "$RUN_POLICIES"
+	mkdir -p "$RUN_POLICIES" && chmod 0755 "$RUN_POLICIES" &&
+		cp -a "$MANAGED/." "$RUN_POLICIES/" &&
+		mount --bind "$RUN_POLICIES" "$MANAGED"
+}
+
+# weston (root) crea el socket en $XDG_RUNTIME_DIR: en buildroot es /var/run
+# (= /run); en otras imágenes, /run/user/0.
+wayland_socket() {
+	for s in /run/wayland-0 /run/user/0/wayland-0; do
+		[ -S "$s" ] && { echo "$s"; return 0; }
+	done
+	return 1
+}
+
+# Flags para equipos de poca RAM (TV box de 1 GB). NEX_LOWMEM=0/1 fuerza; por
+# defecto se activa con menos de 1.5 GB.
+lowmem_flags() {
+	mem_mb=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+	case "${NEX_LOWMEM:-auto}" in
+	0) return ;;
+	auto) [ "${mem_mb:-0}" -lt 1536 ] || return ;;
+	esac
+	# Modo de equipo de gama baja: cachés, tiles de raster y memoria descartable más chicos.
+	# V8 prioriza tamaño sobre velocidad. Sin back/forward cache (deja páginas
+	# enteras en RAM) ni renderer de reserva. Nada de tráfico de fondo (traducción,
+	# variaciones, componentes): en un kiosk no sirve y cada servicio es un proceso más.
+	echo --enable-low-end-device-mode --js-flags=--optimize-for-size \
+		--disable-features=BackForwardCache,SpareRendererForSitePerProcess,Translate,MediaRouter,OptimizationHints \
+		--disable-background-networking --disable-component-update
+}
+
+run_chromium() {
+	sock=$1
+	# shellcheck disable=SC2046 # lowmem_flags devuelve flags sin espacios internos
+	set -- --ozone-platform=wayland --enable-wayland-ime --no-first-run \
+		--disable-session-crashed-bubble --user-data-dir="$UI_HOME/chromium" \
+		--disk-cache-size=52428800 $(lowmem_flags) \
+		--kiosk http://127.0.0.1:8080/
+	if [ "$UI_USER" = root ]; then
+		WAYLAND_DISPLAY=$sock chromium "$@"
+		return
+	fi
+	# Chromium sin root: si el navegador se ve comprometido, no hay root.
+	# Necesita el socket de weston (grupo nex-ui) y los dispositivos de video/audio
+	# (grupos video/audio/input, ver install.sh).
+	chgrp "$UI_USER" "$sock" && chmod 0660 "$sock"
+	mkdir -p "/run/$UI_USER" && chown "$UI_USER" "/run/$UI_USER" && chmod 0700 "/run/$UI_USER"
+	su -s /bin/sh "$UI_USER" -c 'exec env HOME="$0" XDG_RUNTIME_DIR="$1" WAYLAND_DISPLAY="$2" chromium "$@"' \
+		"$UI_HOME" "/run/$UI_USER" "$sock" "$@"
+}
+
+case "$1" in
+	start)
+		[ "${RK_NEX_OS:-1}" = 0 ] && exit 0
+		mkdir -p /run/nex-os "$UI_HOME"
+		[ "$UI_USER" = root ] || chown -R "$UI_USER" "$UI_HOME"
+		mount_policies
+		if [ "$WWW_USER" = root ]; then
+			busybox httpd -f -p 127.0.0.1:8080 -h /opt/nex-os/www \
+				>/run/nex-os/httpd.log 2>&1 &
+		else
+			busybox httpd -f -p 127.0.0.1:8080 -h /opt/nex-os/www -u "$WWW_USER" \
+				>/run/nex-os/httpd.log 2>&1 &
+		fi
+		echo -900 > "/proc/$!/oom_score_adj" 2>/dev/null
+		(
+			until sock=$(wayland_socket); do sleep 1; done
+			# Si falta memoria, el OOM mata primero Chromium (que se relanza solo),
+			# nunca el compositor ni el servidor de la UI.
+			for pid in $(pidof weston); do
+				echo -900 > "/proc/$pid/oom_score_adj" 2>/dev/null
+			done
+			# nex-agent cierra Chromium para aplicar un bloqueo; se relanza solo.
+			while :; do
+				run_chromium "$sock"
+				sleep 1
+			done
+		) >/run/nex-os/chromium.log 2>&1 &
+		;;
+esac
+
+exit 0

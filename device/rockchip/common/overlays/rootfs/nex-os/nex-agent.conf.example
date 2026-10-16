@@ -1,0 +1,12 @@
+# /etc/nex-agent.conf — generado por tools/nex-os/build.sh (no versionar el real).
+# Proyecto Supabase del MDM. La anon key es pública por diseño: la seguridad
+# depende de RLS y del token de cada equipo, no de esta clave.
+NEX_MDM_URL="https://xxxxxxxx.supabase.co"
+NEX_MDM_ANON_KEY="eyJ..."
+
+# Dominios siempre permitidos además del MDM (separados por espacio).
+NEX_AGENT_BASE_DOMAINS=""
+NEX_AGENT_NTP_DOMAINS="pool.ntp.org"
+NEX_AGENT_FALLBACK_DNS="1.1.1.1 9.9.9.9"
+NEX_AGENT_SYNC_INTERVAL=60
+NEX_AGENT_REPORT_INTERVAL=300
