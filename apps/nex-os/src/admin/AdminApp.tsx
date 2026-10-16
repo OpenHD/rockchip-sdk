@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu as MenuIcon,
+  MonitorX,
   Package,
   Palette,
   Plug,
@@ -21,7 +22,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { IdleGuard, StepUpProvider } from './security';
+import { isAdminSupabaseConfigured } from './supabaseAdmin';
+import { SIGNUP_ENABLED, TURNSTILE_SITE_KEY } from './config';
+import Turnstile from './Turnstile';
 import { db, run, type Company } from './api';
 import { FILTERS } from './deviceMeta';
 import AlertsPage from './pages/Alerts';
@@ -32,10 +36,15 @@ import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/N
 import OverviewPage from './pages/Overview';
 import { ApiKeysPage, AuditPage, MembersPage } from './pages/Team';
 import { takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
-import { Button, ErrorText, Field, inputClass, Skeleton, ToastProvider } from './ui';
+import { Button, ErrorText, Field, inputClass, Menu, Skeleton, ToastProvider } from './ui';
 import { useCompanyData } from './useCompanyData';
 
 const initialClaim = takeClaimParam();
+
+/** Espera tras N fallos seguidos de login: 0, 0, 0, 10 s, 20 s, 40 s… hasta 5 min. */
+function lockoutSeconds(failures: number): number {
+  return failures < 3 ? 0 : Math.min(10 * 2 ** (failures - 3), 300);
+}
 
 // ---------------------------------------------------------------------------
 // Autenticación
@@ -114,28 +123,65 @@ function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [failures, setFailures] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState(0);
+  const [now, setNow] = useState(0);
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaReset, setCaptchaReset] = useState(0);
+  const onCaptcha = useCallback((t: string | null) => setCaptcha(t), []);
+  const wait = Math.max(0, Math.ceil((lockedUntil - now) / 1000));
+
+  useEffect(() => {
+    if (!lockedUntil) return;
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [lockedUntil]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (Date.now() < lockedUntil) return;
+    if (TURNSTILE_SITE_KEY && !captcha) {
+      setError('Completá la verificación anti-robots');
+      return;
+    }
     setBusy(true);
     setError(null);
     setInfo(null);
+    const options = captcha ? { captchaToken: captcha } : undefined;
     try {
       const auth = db().auth;
       if (mode === 'in') {
-        const { error: err } = await auth.signInWithPassword({ email, password });
+        const { error: err } = await auth.signInWithPassword({ email, password, options });
         if (err) throw err;
+        setFailures(0);
       } else {
         if (password.length < 12) throw new Error('Usá una contraseña de al menos 12 caracteres');
-        const { error: err } = await auth.signUp({ email, password });
+        if (/^(.)\1+$/.test(password) || password.toLowerCase().includes(email.split('@')[0].toLowerCase())) {
+          throw new Error('Elegí una contraseña que no repita caracteres ni contenga tu email');
+        }
+        const { error: err } = await auth.signUp({ email, password, options });
         if (err) throw err;
         setInfo('Revisá tu email para confirmar la cuenta. Después, NEX o el dueño de tu empresa te da acceso.');
       }
     } catch (err) {
-      // Mensaje genérico: no revelar si el email existe.
-      setError(mode === 'in' ? 'Email o contraseña incorrectos' : (err as Error).message);
+      if (mode === 'in') {
+        // Mensaje genérico: no revelar si el email existe. Freno progresivo ante fuerza bruta
+        // (el límite real lo aplica Supabase Auth por IP; esto evita martillar desde la UI).
+        const next = failures + 1;
+        setFailures(next);
+        const secs = lockoutSeconds(next);
+        if (secs) {
+          setLockedUntil(Date.now() + secs * 1000);
+          setNow(Date.now());
+        }
+        setError('Email o contraseña incorrectos');
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setBusy(false);
+      setPassword('');
+      if (TURNSTILE_SITE_KEY) setCaptchaReset((k) => k + 1);
     }
   };
 
@@ -152,12 +198,19 @@ function SignIn() {
           <input className={inputClass} type="password" required minLength={mode === 'up' ? 12 : undefined}
             autoComplete={mode === 'in' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
+        {TURNSTILE_SITE_KEY && <Turnstile onToken={onCaptcha} resetKey={captchaReset} />}
         <ErrorText error={error} />
         {info && <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{info}</p>}
-        <Button type="submit" disabled={busy} className="h-10">{mode === 'in' ? 'Ingresar' : 'Crear cuenta'}</Button>
-        <button type="button" className="text-sm text-zinc-400 transition hover:text-white" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
-          {mode === 'in' ? '¿No tenés cuenta? Crear una' : 'Ya tengo cuenta'}
-        </button>
+        <Button type="submit" disabled={busy || wait > 0} className="h-10">
+          {wait > 0 ? `Esperá ${wait} s` : mode === 'in' ? 'Ingresar' : 'Crear cuenta'}
+        </Button>
+        {SIGNUP_ENABLED ? (
+          <button type="button" className="text-sm text-zinc-400 transition hover:text-white" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
+            {mode === 'in' ? '¿No tenés cuenta? Crear una' : 'Ya tengo cuenta'}
+          </button>
+        ) : (
+          <p className="text-center text-xs text-zinc-500">¿Sin cuenta? Pedile a NEX o al dueño de tu empresa que te invite.</p>
+        )}
       </form>
     </AuthLayout>
   );
@@ -446,9 +499,19 @@ function Shell({ session }: { session: Session }) {
           <div className="truncate text-xs text-zinc-200">{session.user.email}</div>
           <div className="text-[10px] text-zinc-500">{isSuper ? 'NEX · super-admin' : 'Administrador'}</div>
         </div>
-        <button className="text-zinc-500 transition hover:text-white" title="Cerrar sesión" aria-label="Cerrar sesión" onClick={() => db().auth.signOut()}>
-          <LogOut className="h-4 w-4" />
-        </button>
+        <Menu
+          trigger={(toggle) => (
+            <button className="text-zinc-500 transition hover:text-white" title="Cerrar sesión" aria-label="Opciones de sesión" onClick={toggle}>
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
+          items={[
+            { label: 'Cerrar sesión', icon: LogOut, onClick: () => db().auth.signOut() },
+            // Revoca los refresh tokens en todos los navegadores (ej. si se perdió un celular).
+            { label: 'Cerrar en todos los dispositivos', icon: MonitorX, danger: true, onClick: () => db().auth.signOut({ scope: 'global' }) },
+          ]}
+          placement="top"
+        />
       </div>
     </div>
   );
@@ -498,7 +561,7 @@ function Shell({ session }: { session: Session }) {
 }
 
 export default function AdminApp() {
-  if (!isSupabaseConfigured) {
+  if (!isAdminSupabaseConfigured) {
     return <p className="p-8 text-zinc-300">Falta configurar VITE_SUPABASE_URL y la clave pública.</p>;
   }
   return (
@@ -516,5 +579,10 @@ function AdminRoot() {
   if (stage === 'signed-out' || !session) return <SignIn />;
   if (stage === 'mfa-enroll') return <MfaEnroll onDone={refresh} />;
   if (stage === 'mfa-verify') return <MfaVerify onDone={refresh} />;
-  return <Shell session={session} />;
+  return (
+    <StepUpProvider>
+      <IdleGuard idleMinutes={15} />
+      <Shell session={session} />
+    </StepUpProvider>
+  );
 }

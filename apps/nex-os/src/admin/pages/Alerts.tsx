@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import { Bell, Lock, LockOpen, Mail, Send, ShieldAlert, Skull, WifiOff, X, type LucideIcon } from 'lucide-react';
 import { db, run, type AlertKind, type Company } from '../api';
+import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
 import { Badge, Button, Card, ErrorText, Field, inputClass, PageHeader, Switch } from '../ui';
 
@@ -45,6 +46,7 @@ function EmailChips({ value, onChange }: { value: string[]; onChange: (v: string
 
 export default function AlertsPage({ company, onChanged }: { company: Company; onChanged: () => void }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [chatId, setChatId] = useState(company.alert_telegram_chat_id ?? '');
   const [emails, setEmails] = useState<string[]>(company.alert_emails);
   const [hours, setHours] = useState(company.alert_offline_hours);
@@ -67,10 +69,11 @@ export default function AlertsPage({ company, onChanged }: { company: Company; o
 
   const save = () =>
     guard(async () => {
-      await run(db().rpc('mdm_update_alerts', {
+      // Cambiar a dónde llegan los avisos de seguridad exige confirmar el segundo factor.
+      await stepUp.guard(() => run(db().rpc('mdm_update_alerts', {
         p_company: company.id, p_telegram_chat_id: chatId, p_emails: emails,
         p_offline_hours: hours, p_kinds: [...kinds], p_digest: digest,
-      }));
+      })));
       toast.show('Preferencias de avisos guardadas');
       onChanged();
     });

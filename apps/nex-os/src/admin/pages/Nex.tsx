@@ -2,11 +2,13 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { BadgeCheck, Building2, Cpu, Globe, Pencil, Plus, Rocket, ShieldCheck, Skull } from 'lucide-react';
 import { db, run, type CatalogApp, type Company, type DomainReportRow, type FirmwareRelease, type FirmwareTarget } from '../api';
 import { appGradient, formatDate, relativeTime } from '../format';
+import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
 import { Badge, Button, Card, Chip, EmptyState, ErrorText, Field, IconButton, inputClass, Modal, PageHeader, Skeleton, Switch, type Tone } from '../ui';
 
 export function NewCompanyPage({ onCreated }: { onCreated: (id: string) => void }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -16,7 +18,7 @@ export function NewCompanyPage({ onCreated }: { onCreated: (id: string) => void 
     setBusy(true);
     setError(null);
     try {
-      const id = await run<string>(db().rpc('mdm_create_company', { p_name: name, p_owner_email: email }));
+      const id = await stepUp.guard(() => run<string>(db().rpc('mdm_create_company', { p_name: name, p_owner_email: email })));
       toast.show(`Empresa "${name}" creada`);
       onCreated(id);
     } catch (err) {
@@ -46,6 +48,7 @@ const EMPTY_APP: CatalogApp = { id: '', name: '', kind: 'web', launch_url: '', i
 
 function CatalogModal({ initial, isNew, onClose, onSaved }: { initial: CatalogApp; isNew: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [form, setForm] = useState(initial);
   const [domains, setDomains] = useState(initial.domains.join('\n'));
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +56,11 @@ function CatalogModal({ initial, isNew, onClose, onSaved }: { initial: CatalogAp
     e.preventDefault();
     setError(null);
     try {
-      await run(db().rpc('mdm_upsert_catalog_app', {
+      await stepUp.guard(() => run(db().rpc('mdm_upsert_catalog_app', {
         p_id: form.id.trim(), p_name: form.name.trim(), p_kind: form.kind,
         p_launch_url: form.kind === 'web' ? form.launch_url : null, p_icon_url: null,
         p_domains: domains.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean), p_active: form.active,
-      }));
+      })));
       toast.show(`${form.name} guardada en el catálogo`);
       onSaved();
       onClose();
@@ -106,6 +109,7 @@ const setCatalogAttestation = (id: string, enabled: boolean) =>
 
 export function CatalogPage() {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [apps, setApps] = useState<CatalogApp[] | null>(null);
   const [editing, setEditing] = useState<{ app: CatalogApp; isNew: boolean } | null>(null);
   const [tick, setTick] = useState(0);
@@ -124,7 +128,7 @@ export function CatalogPage() {
   const toggleAttestation = async (a: CatalogApp, enabled: boolean) => {
     setApps((prev) => prev?.map((x) => (x.id === a.id ? { ...x, pass_attestation: enabled } : x)) ?? prev);
     try {
-      await setCatalogAttestation(a.id, enabled);
+      await stepUp.guard(() => setCatalogAttestation(a.id, enabled));
       toast.show(enabled ? `${a.name} recibe la atestación del equipo` : `${a.name} ya no recibe la atestación`);
     } catch (err) {
       toast.show((err as Error).message, 'error');
@@ -182,6 +186,7 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
 
 export function PiracyPage() {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [rows, setRows] = useState<DomainReportRow[] | null>(null);
   const [days, setDays] = useState(14);
   const [onlyPending, setOnlyPending] = useState(true);
@@ -200,7 +205,7 @@ export function PiracyPage() {
 
   const classify = async (domain: string, status: string | null) => {
     try {
-      await run(db().rpc('mdm_classify_domain', { p_domain: domain, p_status: status }));
+      await stepUp.guard(() => run(db().rpc('mdm_classify_domain', { p_domain: domain, p_status: status })));
       toast.show(status === 'pirateria' ? `${domain} bloqueado en todos los equipos` : `${domain} clasificado`);
       setTick((t) => t + 1);
     } catch (err) {
@@ -296,6 +301,7 @@ const EMPTY_RELEASE = { version: '', build: '', url: '', sha256: '', size: '', s
 
 function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [f, setF] = useState(EMPTY_RELEASE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -305,7 +311,7 @@ function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
     setBusy(true);
     setError(null);
     try {
-      await publishRelease({
+      await stepUp.guard(() => publishRelease({
         version: f.version.trim(),
         build: Number(f.build),
         url: f.url.trim(),
@@ -313,7 +319,7 @@ function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
         size: Number(f.size),
         sig: f.sig.replace(/\s+/g, ''),
         notes: f.notes.trim() || null,
-      });
+      }));
       toast.show(`Release ${f.version} (build ${f.build}) publicado. Asignalo para distribuirlo.`);
       onDone();
       onClose();
@@ -360,6 +366,7 @@ function TargetSelect({ value, releases, onChange, noneLabel }: { value: string 
 
 export function FirmwarePage({ companies }: { companies: Company[] }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [releases, setReleases] = useState<FirmwareRelease[] | null>(null);
   const [targets, setTargets] = useState<FirmwareTarget[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -387,7 +394,7 @@ export function FirmwarePage({ companies }: { companies: Company[] }) {
 
   const assign = async (company: Company | null, release: string | null) => {
     try {
-      await setFirmwareTarget(company?.id ?? null, release);
+      await stepUp.guard(() => setFirmwareTarget(company?.id ?? null, release));
       const r = releases?.find((x) => x.id === release);
       const who = company ? company.name : 'todos los equipos';
       toast.show(r ? `${who}: build ${r.build} asignado` : company ? `${company.name} vuelve a usar el firmware global` : 'Sin firmware global asignado');

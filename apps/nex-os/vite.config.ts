@@ -121,6 +121,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
+        // El panel de administración nunca se sirve desde la caché del service worker:
+        // siempre de la red, con sus cabeceras de seguridad y la última versión.
+        globIgnores: ['**/admin.html', '**/assets/admin-*'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         // Multi-page: don't let the SPA SW swallow /docs or /nex-music
         navigateFallback: 'index.html',

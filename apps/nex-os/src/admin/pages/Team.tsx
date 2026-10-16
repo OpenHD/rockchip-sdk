@@ -2,11 +2,13 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Ban, Copy, KeyRound, Plug, ScrollText, TriangleAlert, UserPlus, Users } from 'lucide-react';
 import { db, run, type ApiKey, type AuditEntry, type Company, type Member, type NewApiKey } from '../api';
 import { AUDIT_LABELS, copyText, formatDate, relativeTime } from '../format';
+import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
 import { Badge, Button, Card, EmptyState, ErrorText, Field, IconButton, inputClass, Modal, PageHeader, Skeleton } from '../ui';
 
 export function MembersPage({ company }: { company: Company }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const [members, setMembers] = useState<Member[] | null>(null);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'admin' | 'owner'>('admin');
@@ -29,7 +31,7 @@ export function MembersPage({ company }: { company: Company }) {
     setBusy(true);
     setError(null);
     try {
-      await run(db().rpc('mdm_set_member', { p_company: company.id, p_email: email, p_role: r }));
+      await stepUp.guard(() => run(db().rpc('mdm_set_member', { p_company: company.id, p_email: email, p_role: r })));
       toast.show(r ? `${email} ahora es ${r === 'owner' ? 'dueño' : 'admin'}` : `${email} ya no tiene acceso`);
       setEmail('');
       setTick((t) => t + 1);
@@ -205,6 +207,7 @@ function NewKeyModal({ created, onClose }: { created: NewApiKey; onClose: () => 
 
 export function ApiKeysPage({ company }: { company: Company }) {
   const toast = useToast();
+  const stepUp = useStepUp();
   const isOwner = useIsOwner(company.id);
   const [keys, setKeys] = useState<ApiKey[] | null>(null);
   const [name, setName] = useState('');
@@ -230,7 +233,7 @@ export function ApiKeysPage({ company }: { company: Company }) {
     setBusy(true);
     setError(null);
     try {
-      setCreated(await createApiKey(company.id, name.trim()));
+      setCreated(await stepUp.guard(() => createApiKey(company.id, name.trim())));
       setName('');
       setTick((t) => t + 1);
     } catch (err) {
@@ -243,7 +246,7 @@ export function ApiKeysPage({ company }: { company: Company }) {
   const revoke = async (k: ApiKey) => {
     setBusy(true);
     try {
-      await revokeApiKey(k.id);
+      await stepUp.guard(() => revokeApiKey(k.id));
       toast.show(`Clave "${k.name}" revocada`);
       setConfirmRevoke(null);
       setTick((t) => t + 1);

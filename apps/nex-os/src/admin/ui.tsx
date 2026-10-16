@@ -304,7 +304,15 @@ export interface MenuItem {
   danger?: boolean;
 }
 
-export function Menu({ trigger, items }: { trigger: (open: () => void) => ReactNode; items: MenuItem[] }) {
+export function Menu({
+  trigger,
+  items,
+  placement = 'bottom',
+}: {
+  trigger: (open: () => void) => ReactNode;
+  items: MenuItem[];
+  placement?: 'bottom' | 'top';
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -317,7 +325,7 @@ export function Menu({ trigger, items }: { trigger: (open: () => void) => ReactN
     <div ref={ref} className="relative">
       {trigger(() => setOpen((o) => !o))}
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-52 animate-[nexIn_.12s_ease-out] overflow-hidden rounded-xl border border-white/10 bg-[#171a24] p-1 shadow-xl">
+        <div className={`absolute right-0 z-30 w-60 animate-[nexIn_.12s_ease-out] overflow-hidden rounded-xl border border-white/10 bg-[#171a24] p-1 shadow-xl ${placement === 'top' ? 'bottom-full mb-2' : 'mt-1'}`}>
           {items.map((it) => (
             <button
               key={it.label}

@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react';
 import { AppWindow, ShieldCheck } from 'lucide-react';
 import { db, run, type CatalogApp, type Company } from '../api';
 import { appGradient } from '../format';
+
+function hostOf(url: string | null): string {
+  try {
+    return new URL(url ?? '').hostname;
+  } catch {
+    return 'URL inválida';
+  }
+}
 import { useToast } from '../toast';
 import { Badge, Card, EmptyState, ErrorText, PageHeader, Skeleton, Switch } from '../ui';
 
@@ -92,7 +100,7 @@ export default function AppsPage({ company }: { company: Company }) {
                     {app.kind === 'internal' && <Badge tone="info">NEX-OS</Badge>}
                   </div>
                   <div className="truncate text-xs text-zinc-500">
-                    {app.kind === 'web' ? new URL(app.launch_url ?? 'https://-').hostname : 'App integrada'} · {app.domains.length} dominios
+                    {app.kind === 'web' ? hostOf(app.launch_url) : 'App integrada'} · {app.domains.length} dominios
                   </div>
                 </div>
                 <Switch checked={on} disabled={busy === app.id} onChange={(v) => toggle(app, v)} label={`Habilitar ${app.name}`} />

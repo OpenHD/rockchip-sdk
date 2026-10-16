@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Pruebas SQL del MDM (v6 → v7 → v8 → v9) en un Postgres descartable.
+# Pruebas SQL del MDM (v6 → v7 → v8 → v9 → v10) en un Postgres descartable.
 #
 #   apps/nex-os/supabase/tests/run.sh
 #   PG_BIN=/ruta/a/postgres/bin apps/nex-os/supabase/tests/run.sh
 #
 # Necesita Postgres 15+ con pgcrypto (initdb, pg_ctl, psql). Usa $PG_BIN si está definido; si no, el PATH.
 # Crea un cluster en un directorio temporal (solo socket Unix, sin TCP), aplica stubs de Supabase, v6, v7, los datos
-# de prueba, v8 dos veces y v9 dos veces (idempotencia), corre tests.sql y borra todo al salir.
+# de prueba, v8 dos veces y v9 y v10 dos veces (idempotencia), corre tests.sql y borra todo al salir.
 # Sale con código distinto de 0 si alguna prueba falla o si algún script da error.
 set -euo pipefail
 
@@ -64,6 +64,8 @@ apply "v8 (1ra pasada)" "$SQL_DIR/schema-mdm-v8.sql"
 apply "v8 (2da pasada)" "$SQL_DIR/schema-mdm-v8.sql"
 apply "v9 (1ra pasada)" "$SQL_DIR/schema-mdm-v9.sql"
 apply "v9 (2da pasada)" "$SQL_DIR/schema-mdm-v9.sql"
+apply "v10 (1ra pasada)" "$SQL_DIR/schema-mdm-v10.sql"
+apply "v10 (2da pasada)" "$SQL_DIR/schema-mdm-v10.sql"
 
 status=0
 q -f "$HERE/tests.sql" >"$TMP/tests.log" 2>&1 || status=$?
