@@ -85,4 +85,8 @@ mkdir -p "$(dirname "$OUTPUT_DIR")"
 cp -a "$SOURCE_DIR/dist" "$OUTPUT_DIR"
 # El panel de administración no viaja en el TV box: menos superficie de ataque en el equipo.
 rm -f "$OUTPUT_DIR/admin.html" "$OUTPUT_DIR"/assets/admin-*
+# Solo lo alcanzable desde la UI del TV (sin docs, música ni el resto del escritorio).
+if [ "${NEX_MDM:-1}" = 1 ] && [ -f "$SOURCE_DIR/scripts/prune-tv-dist.mjs" ]; then
+	node "$SOURCE_DIR/scripts/prune-tv-dist.mjs" "$OUTPUT_DIR"
+fi
 printf 'NEX-OS static files installed in %s\n' "$OUTPUT_DIR"

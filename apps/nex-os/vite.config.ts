@@ -88,6 +88,9 @@ export default defineConfig({
       },
     },
     VitePWA({
+      // TV box (VITE_NEX_MDM=1): sin service worker ni precache. La UI ya está en el equipo
+      // y precachear el escritorio entero gasta disco y RAM que el TV no tiene.
+      disable: process.env.VITE_NEX_MDM === '1',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons.svg', 'robots.txt'],
       manifest: {
@@ -135,22 +138,6 @@ export default defineConfig({
           /^\/share(?:\/|$|\?)/,
           /^\/p\//,
         ],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365 // <== 365 days
-              },
-              cacheableResponse: {
-                statuses: [0, 20]
-              }
-            }
-          }
-        ]
       }
     })
   ],

@@ -3,3 +3,6 @@
 # y ajustar Wi-Fi, LED, IR y eMMC según el DTB original del equipo.
 RK_KERNEL_DTS_NAME="rk3318-a95x-z2"
 RK_KERNEL_CFG_FRAGMENTS="nex-mdm.config"
+# Rootfs de 3 GiB: en un eMMC de 8 GB deja ~3.8 GiB en userdata, donde nex-agent
+# descarga el update.img completo de una OTA (el parameter.txt de la EVB deja <1 GiB).
+RK_PARAMETER="parameter-nex.txt"

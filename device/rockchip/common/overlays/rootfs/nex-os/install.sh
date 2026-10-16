@@ -16,6 +16,20 @@ cp "$SOURCE_DIR/S99nex-os" "$TARGET_DIR/etc/init.d/S99nex-os"
 cp "$SOURCE_DIR/nex-os.default" "$TARGET_DIR/etc/default/nex-os"
 chmod 0755 "$TARGET_DIR/etc/init.d/S99nex-os"
 
+# Weston lee órdenes en caliente (apagar/prender la pantalla) de este archivo.
+mkdir -p "$TARGET_DIR/etc/profile.d"
+echo 'export WESTON_DRM_CONFIG=/tmp/.weston_drm.conf' > "$TARGET_DIR/etc/profile.d/nex-weston.sh"
+
+# Tecla power: pantalla on/off en vez de suspender (ver nex-power-key.sh).
+if [ -d "$TARGET_DIR/etc/input-event-daemon.conf.d" ]; then
+	install -D -m 0755 "$SOURCE_DIR/nex-power-key.sh" "$TARGET_DIR/usr/bin/nex-power-key.sh"
+	cat > "$TARGET_DIR/etc/input-event-daemon.conf.d/power-key.conf" <<'CONF'
+[Keys]
+*POWER:1      = /usr/bin/nex-power-key.sh press
+*POWER:0      = /usr/bin/nex-power-key.sh release
+CONF
+fi
+
 [ "${RK_NEX_MDM:-}" ] || exit 0
 
 # --- Gestión remota (nex-agent) ---

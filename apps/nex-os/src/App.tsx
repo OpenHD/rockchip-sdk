@@ -138,6 +138,16 @@ function AppContent() {
 }
 
 function App() {
+  if (isMdmBuild) {
+    // TV box gestionado: sin escritorio, solo lo que habilita la empresa. Sin los
+    // providers del escritorio (música, archivos, runtime): las apps que muestra el TV
+    // no los usan y en un equipo de 1 GB la RAM no sobra.
+    return (
+      <Suspense fallback={<ScreenFallback />}>
+        <MdmGate />
+      </Suspense>
+    );
+  }
   return (
     <SettingsProvider>
       <MusicPlayerProvider>
@@ -147,14 +157,7 @@ function App() {
               <UIProvider>
                 <WindowManagerProvider>
                   <ClipboardHistoryProvider>
-                    {isMdmBuild ? (
-                      // TV box gestionado: sin escritorio, solo lo que habilita la empresa.
-                      <Suspense fallback={<ScreenFallback />}>
-                        <MdmGate />
-                      </Suspense>
-                    ) : (
-                      <AppContent />
-                    )}
+                    <AppContent />
                   </ClipboardHistoryProvider>
                 </WindowManagerProvider>
               </UIProvider>

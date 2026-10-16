@@ -92,7 +92,7 @@ export default function UnlockCodeScreen({ unlock, onClose }: { unlock: MdmUnloc
         : null);
 
   return (
-    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-8 p-12 select-none">
+    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-8 tv-safe select-none">
       <div className="text-center max-w-3xl">
         <h1 className="text-4xl font-semibold">Código de desbloqueo</h1>
         <p className="mt-3 text-xl text-white/60">
