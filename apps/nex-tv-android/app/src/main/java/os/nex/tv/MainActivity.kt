@@ -84,6 +84,12 @@ class MainActivity : Activity() {
                 "if(b)b.focus();}})()", null)
     }
 
+    // Botón Home con NEX-OS ya adelante.
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        web.postDelayed({ restoreFocus() }, 200)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
@@ -110,8 +116,12 @@ class MainActivity : Activity() {
                 when {
                     fullscreenView != null -> fullscreenCallback?.onCustomViewHidden()
                     !onUi() -> goHome()
-                    else -> web.evaluateJavascript(
-                        "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))", null)
+                    else -> {
+                        web.evaluateJavascript(
+                            "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))", null)
+                        // Al cerrar una app interna el foco queda en <body>.
+                        web.postDelayed({ restoreFocus() }, 300)
+                    }
                 }
             }
             return true
