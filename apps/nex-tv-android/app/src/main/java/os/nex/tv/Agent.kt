@@ -2,6 +2,7 @@ package os.nex.tv
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
@@ -120,6 +121,8 @@ object Agent {
                 computeMode()
                 val prevAllowed = allowed
                 applyAllowlist()
+                // Bloqueado: Android cierra las apps que salen de la lista del kiosko.
+                Kiosk.syncPackages(app)
                 publishUiState()
                 reportModeChange()
                 if (mode != "starting" && mode != "unpaired" && !Kiosk.isOwner(app)) {
@@ -147,6 +150,11 @@ object Agent {
     private fun restartUi(why: String) {
         Log.i(TAG, "$why: reiniciando la interfaz")
         onRestartUi?.invoke(why)
+        // Si había una app Android adelante, NEX-OS vuelve al frente (Device Owner puede hacerlo desde segundo plano).
+        runCatching {
+            app.startActivity(Intent(app, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        }.onFailure { Log.w(TAG, "no se pudo traer NEX-OS al frente", it) }
     }
 
     // ---- Sincronización ----
@@ -335,6 +343,13 @@ object Agent {
                 apps.put(JSONObject()
                     .put("id", a.opt("id")).put("name", a.opt("name"))
                     .put("kind", a.opt("kind")).put("launch_url", a.opt("launch_url")))
+            }
+            // Play Store y apps instaladas por el usuario. Viajan como "web" con una URL del origen
+            // local que UiServer convierte en "abrir la app": la UI no necesita cambios.
+            for (a in AndroidApps.list(app)) {
+                apps.put(JSONObject()
+                    .put("id", "android:${a.pkg}".take(41)).put("name", a.label.take(60))
+                    .put("kind", "web").put("launch_url", "${UiServer.ORIGIN}${AndroidApps.LAUNCH_PREFIX}${a.pkg}"))
             }
         }
         // Nunca se publica el token ni la configuración cruda.

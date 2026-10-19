@@ -42,10 +42,10 @@ object Kiosk {
         val dpm = dpm(activity)
         val admin = admin(activity)
         runCatching {
-            dpm.setLockTaskPackages(admin, arrayOf(activity.packageName))
+            syncPackages(activity)
             if (Build.VERSION.SDK_INT >= 28) {
-                // Sin botón Home, recientes, notificaciones ni menú de apagado de Android.
-                dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
+                // Solo el botón Home (vuelve a NEX-OS): sin recientes, notificaciones ni menú de apagado de Android.
+                dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_HOME)
             }
             val home = IntentFilter(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
@@ -65,6 +65,26 @@ object Kiosk {
         }
     }
 
+    @Volatile private var lastPackages: List<String> = emptyList()
+
+    /**
+     * Apps que pueden correr dentro del modo kiosko. Con el equipo activo: NEX-OS, la Play Store
+     * y las apps del usuario. Bloqueado o sin vincular: solo NEX-OS (Android cierra las demás).
+     */
+    fun syncPackages(ctx: Context) {
+        if (!isOwner(ctx)) return
+        val pkgs = mutableListOf(ctx.packageName)
+        if (Agent.mode == "active") {
+            pkgs += AndroidApps.PLAY_SUPPORT.filter { AndroidApps.installed(ctx, it) }
+            pkgs += AndroidApps.list(ctx).map { it.pkg }
+        }
+        val list = pkgs.distinct()
+        if (list == lastPackages) return
+        runCatching { dpm(ctx).setLockTaskPackages(admin(ctx), list.toTypedArray()) }
+            .onSuccess { lastPackages = list; Log.i(TAG, "apps del kiosko: ${list.size}") }
+            .onFailure { Log.w(TAG, "setLockTaskPackages falló", it) }
+    }
+
     /** Quita el Device Owner y todas las políticas (solo desde ADB, ver ReleaseReceiver). */
     fun release(ctx: Context) {
         if (!isOwner(ctx)) return
@@ -78,6 +98,7 @@ object Kiosk {
                 dpm.setKeyguardDisabled(admin, false)
             }
             dpm.setLockTaskPackages(admin, emptyArray())
+            lastPackages = emptyList()
             @Suppress("DEPRECATION")
             dpm.clearDeviceOwnerApp(ctx.packageName)
         }.onFailure { Log.w(TAG, "no se pudo liberar el equipo", it) }

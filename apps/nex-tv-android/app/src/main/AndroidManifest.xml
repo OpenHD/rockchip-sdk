@@ -6,6 +6,20 @@
     <!-- Serie del equipo para el hardware_id (solo se concede siendo Device Owner). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
+    <!-- Para listar la Play Store y las apps del usuario como mosaicos de NEX-OS. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <package android:name="com.google.android.gms" />
+        <package android:name="com.google.android.gsf" />
+    </queries>
+
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 

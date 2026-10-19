@@ -73,11 +73,23 @@ class MainActivity : Activity() {
         hideSystemUi()
         Kiosk.enter(this)
         web.requestFocus()
+        restoreFocus()
+    }
+
+    /** Al volver de una app Android el foco queda en <body> y el control remoto no mueve nada. */
+    private fun restoreFocus() {
+        if (onUi()) web.evaluateJavascript(
+            "(function(){var a=document.activeElement;if(!a||a===document.body){" +
+                "var b=document.querySelector('button[data-index=\"0\"]')||document.querySelector('button');" +
+                "if(b)b.focus();}})()", null)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideSystemUi()
+        if (hasFocus) {
+            hideSystemUi()
+            restoreFocus()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

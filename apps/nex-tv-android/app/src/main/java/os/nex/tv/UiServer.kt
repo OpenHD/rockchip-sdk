@@ -43,7 +43,13 @@ class UiServer(private val ctx: Context) {
 
     /** Navegación de nivel superior: true = se cancela. */
     fun shouldBlockNavigation(url: Uri): Boolean {
-        if (url.scheme == "https" && url.host == HOST) return false
+        if (url.scheme == "https" && url.host == HOST) {
+            val path = url.path.orEmpty()
+            if (!path.startsWith(AndroidApps.LAUNCH_PREFIX)) return false
+            // Mosaico de una app Android: se abre la app y la UI se queda donde estaba.
+            AndroidApps.launch(ctx, path.removePrefix(AndroidApps.LAUNCH_PREFIX))
+            return true
+        }
         if (url.scheme == "https" && Agent.isAllowed(url.host)) return false
         Agent.recordBlocked(url.host)
         return true
@@ -61,6 +67,8 @@ class UiServer(private val ctx: Context) {
             }
             return text(404, "Not found")
         }
+        // Nunca se carga como página: shouldBlockNavigation la convierte en "abrir la app".
+        if (path.startsWith(AndroidApps.LAUNCH_PREFIX)) return text(204, "")
         // El panel de administración no viaja en el TV box.
         if (path == "/admin.html" || path.startsWith("/admin")) return text(404, "Not found")
 
