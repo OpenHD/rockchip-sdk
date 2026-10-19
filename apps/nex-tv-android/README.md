@@ -41,6 +41,8 @@ Requiere ADB por red o USB y que el equipo **no tenga cuentas** (recién resetea
 adb connect <ip-del-equipo>:5555
 adb install -r app-release.apk
 adb shell dpm set-device-owner --user 0 os.nex.tv/.AdminReceiver
+# Sin esto Android tapa NEX-OS con el aviso "Viewing full screen" y le roba el foco al control.
+adb shell settings put secure immersive_mode_confirmations confirmed
 adb shell am start -n os.nex.tv/.MainActivity
 ```
 
