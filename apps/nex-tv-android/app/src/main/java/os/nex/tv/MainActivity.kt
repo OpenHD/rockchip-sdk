@@ -87,9 +87,12 @@ class MainActivity : Activity() {
                 "if(b)b.focus();}})()", null)
     }
 
-    // Botón Home con NEX-OS ya adelante.
+    // Botón Home con NEX-OS ya adelante. Si hay una app web abierta (YouTube corre en este mismo WebView),
+    // vuelve al escritorio igual que con "Atrás".
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        if (fullscreenView != null) fullscreenCallback?.onCustomViewHidden()
+        if (!onUi()) goHome()
         web.postDelayed({ restoreFocus() }, 200)
     }
 
