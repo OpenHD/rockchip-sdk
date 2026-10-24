@@ -55,6 +55,7 @@ export default defineConfig({
         main: './index.html',
         spotify: './nex-music.html',
         docs: './docs.html',
+        admin: './admin.html',
       },
       output: {
         manualChunks(id) {
@@ -77,6 +78,8 @@ export default defineConfig({
           const url = req.url || ''
           if (url === '/nex-music' || url === '/nex-music/') {
             req.url = '/nex-music.html'
+          } else if (url === '/admin' || url === '/admin/') {
+            req.url = '/admin.html'
           } else if (url === '/docs' || url === '/docs/' || /^\/docs\?/.test(url)) {
             req.url = '/docs.html' + (url.includes('?') ? url.slice(url.indexOf('?')) : '')
           }
@@ -118,11 +121,15 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
+        // El panel de administración nunca se sirve desde la caché del service worker:
+        // siempre de la red, con sus cabeceras de seguridad y la última versión.
+        globIgnores: ['**/admin.html', '**/assets/admin-*'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         // Multi-page: don't let the SPA SW swallow /docs or /nex-music
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [
           /^\/docs(?:\/|$|\?)/,
+          /^\/admin(?:\/|$|\?)/,
           /^\/nex-music(?:\/|$|\?)/,
           /^\/api\//,
           /^\/share(?:\/|$|\?)/,
