@@ -30,6 +30,8 @@ android {
         buildConfigField("String", "MDM_ANON_KEY", "\"${nexProp("nex.mdmAnonKey")}\"")
         // Dominios que siempre se permiten además de Supabase (separados por espacio).
         buildConfigField("String", "BASE_DOMAINS", "\"${nexProp("nex.baseDomains")}\"")
+        // Demo sin backend: el agente simula al servidor (ver Demo.kt). Nunca en equipos de clientes.
+        buildConfigField("boolean", "DEMO", "${nexProp("nex.demo") == "true"}")
     }
 
     buildFeatures {

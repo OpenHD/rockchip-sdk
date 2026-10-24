@@ -10,11 +10,18 @@ ASSETS="$DIR/app/src/main/assets/www"
 
 MDM_URL=${NEX_MDM_URL:-}
 MDM_KEY=${NEX_MDM_ANON_KEY:-}
-case "$MDM_URL" in
-https://*) ;;
-*) echo "NEX_MDM_URL must be the https:// URL of the MDM Supabase project" >&2; exit 1 ;;
-esac
-printf '%s' "$MDM_KEY" | grep -Eq '^[A-Za-z0-9._-]{20,}$' || { echo "NEX_MDM_ANON_KEY is missing or invalid" >&2; exit 1; }
+# NEX_DEMO=1: APK de demostración sin backend (el agente simula al servidor, ver Demo.kt).
+DEMO=false
+if [ "${NEX_DEMO:-0}" = 1 ]; then
+	DEMO=true
+	echo "Compilando APK DEMO: no usar en equipos de clientes" >&2
+else
+	case "$MDM_URL" in
+	https://*) ;;
+	*) echo "NEX_MDM_URL must be the https:// URL of the MDM Supabase project (or set NEX_DEMO=1)" >&2; exit 1 ;;
+	esac
+	printf '%s' "$MDM_KEY" | grep -Eq '^[A-Za-z0-9._-]{20,}$' || { echo "NEX_MDM_ANON_KEY is missing or invalid" >&2; exit 1; }
+fi
 
 command -v npm >/dev/null || { echo "Node.js/npm are required" >&2; exit 1; }
 [ -f "$SOURCE_DIR/package.json" ] || { echo "NEX-OS source not found in $SOURCE_DIR (set NEX_OS_SOURCE_DIR)" >&2; exit 1; }
@@ -43,6 +50,6 @@ rm -f "$ASSETS/admin.html" "$ASSETS"/assets/admin-* "$ASSETS/sw.js" "$ASSETS"/wo
 : "${ANDROID_HOME:=$HOME/Library/Android/sdk}"
 export ANDROID_HOME
 "$DIR/gradlew" -p "$DIR" assembleRelease \
-	-Pnex.mdmUrl="$MDM_URL" -Pnex.mdmAnonKey="$MDM_KEY" -Pnex.baseDomains="${NEX_AGENT_BASE_DOMAINS:-}"
+	-Pnex.mdmUrl="$MDM_URL" -Pnex.mdmAnonKey="$MDM_KEY" -Pnex.baseDomains="${NEX_AGENT_BASE_DOMAINS:-}" -Pnex.demo="$DEMO"
 
 echo "APK: $DIR/app/build/outputs/apk/release/app-release.apk"

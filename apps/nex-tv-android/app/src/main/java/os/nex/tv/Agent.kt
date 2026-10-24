@@ -50,6 +50,7 @@ object Agent {
     private val eventsFile get() = File(dir, "events.jsonl")
     private val appliedFile get() = File(dir, "applied_mode")
     private val bootFile get() = File(dir, "boot")
+    private val demoStateFile get() = File(dir, "demo_state")
     val logoDir: File get() = File(dir, "branding")
 
     /** Estado publicado para la UI (/agent/ui-state.json). */
@@ -68,6 +69,7 @@ object Agent {
     private var reason = ""
     private var payWarn = false
     private val onceKeys = HashSet<String>()
+    @Volatile private var forceSync = false
 
     fun start(context: Context) {
         if (::app.isInitialized) return
@@ -113,7 +115,8 @@ object Agent {
             try {
                 val t = now()
                 val interval = if (prevMode in setOf("", "starting", "unpaired")) 10L else SYNC_INTERVAL
-                if (t - lastSyncTry >= interval) {
+                if (forceSync || t - lastSyncTry >= interval) {
+                    forceSync = false
                     lastSyncTry = t
                     if (syncRemote()) updateLogo()
                 }
@@ -198,6 +201,7 @@ object Agent {
     }
 
     private fun syncRemote(): Boolean {
+        if (BuildConfig.DEMO) return syncDemo()
         if (mdmHost == null || mdmKey.isEmpty()) {
             Log.w(TAG, "sin nex.mdmUrl/nex.mdmAnonKey en la compilación")
             return false
@@ -255,6 +259,33 @@ object Agent {
         val ep = resp.opt("server_epoch")
         if (ep is Number && ep.toLong() > 0) serverEpochFile.writeAtomic(ep.toLong().toString())
         return true
+    }
+
+    /** Demo: la respuesta del "servidor" sale de Demo.kt y se guarda igual que una real. */
+    private fun syncDemo(): Boolean {
+        val state = demoStateFile.readOrNull()?.takeIf { it in Demo.STATES } ?: "activo"
+        val resp = Demo.syncResponse(state, now())
+        dropEvents(readEvents().size)
+        if (resp.optString("status") == "unpaired") {
+            pairingFile.writeAtomic(JSONObject()
+                .put("pairing_code", resp.opt("pairing_code"))
+                .put("pairing_expires_at", resp.opt("pairing_expires_at")).toString())
+            configFile.delete()
+        } else {
+            configFile.writeAtomic(resp.toString())
+            pairingFile.delete()
+        }
+        lastSyncFile.writeAtomic(now().toString())
+        serverEpochFile.writeAtomic(now().toString())
+        return true
+    }
+
+    /** Cambia el escenario de la demo; se aplica en la próxima vuelta del ciclo (≤ 5 s). */
+    fun setDemoState(state: String) {
+        if (!BuildConfig.DEMO || !::dir.isInitialized) return
+        Log.i(TAG, "demo: escenario $state")
+        demoStateFile.writeAtomic(state)
+        forceSync = true
     }
 
     // ---- Modo efectivo: starting | unpaired | locked | active ----

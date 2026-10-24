@@ -66,6 +66,16 @@
         </receiver>
 
         <!-- Salida de emergencia del kiosko: DUMP solo lo tienen ADB (shell) y el sistema. -->
+        <!-- Solo actúa en compilaciones demo (BuildConfig.DEMO). DUMP: solo adb puede enviarlo. -->
+        <receiver
+            android:name=".DemoReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="os.nex.tv.DEMO" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".ReleaseReceiver"
             android:exported="true"
