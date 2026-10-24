@@ -40,7 +40,7 @@ const ICON_PATHS: Record<string, string> = {
   sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v2 M12 20v2 M4 12H2 M22 12h-2 M5.6 5.6l1.4 1.4 M17 17l1.4 1.4 M18.4 5.6L17 7 M7 17l-1.4 1.4',
   globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M3 12h18 M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z',
   store: 'M5 8h14l-1 12H6z M9 8a3 3 0 0 1 6 0 M9 12v0 M15 12v0',
-  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1V3h-4v2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1V21h4v-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
 };
 
 function iconKey(app: { id: string; name: string }): string | null {
@@ -85,7 +85,7 @@ const WEATHER = { temp: '18°', cond: 'Parcial nublado' };
 
 function WeatherChip() {
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center space-x-3">
       <svg viewBox="0 0 24 24" fill="none" stroke="#ffd27a" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="h-9 w-9" aria-hidden>
         {ICON_PATHS.sun.split(' M').map((seg, i) => (
           <path key={i} d={(i === 0 ? '' : 'M') + seg} />
@@ -130,7 +130,7 @@ function Brand({ state, size = 'lg' }: { state: MdmState; size?: 'lg' | 'sm' }) 
 
 function FullScreen({ children }: { children: ReactNode }) {
   return (
-    <div className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-10 p-12 text-center select-none">
+    <div className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center space-y-10 p-12 text-center select-none">
       {children}
     </div>
   );
@@ -177,9 +177,9 @@ function PairingScreen({ state }: { state: MdmState }) {
   return (
     <FullScreen>
       <Brand state={state} />
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center space-y-4">
         <p className="text-2xl text-white/80">Vinculá este equipo desde el panel de tu empresa</p>
-        <div className="flex items-center gap-10">
+        <div className="flex items-center space-x-10">
           {qr && <img src={qr} alt="QR de vinculación" className="h-56 w-56 rounded-xl bg-white p-2 [image-rendering:pixelated]" />}
           <div className="font-mono text-7xl tracking-[0.2em] bg-white/5 border border-white/15 rounded-2xl px-12 py-8">
             {state.pairingCode ? formatCode(state.pairingCode) : '········'}
@@ -212,7 +212,7 @@ function LockScreen({ state }: { state: MdmState }) {
   return (
     <FullScreen>
       <Brand state={state} />
-      <div className="flex flex-col items-center gap-4 max-w-3xl">
+      <div className="flex flex-col items-center space-y-4 max-w-3xl">
         <div className="text-6xl" aria-hidden>🔒</div>
         <h1 className="text-4xl font-semibold">{title}</h1>
         {message && <p className="text-2xl text-white/80 leading-relaxed">{message}</p>}
@@ -341,12 +341,12 @@ function TechPin({ onOk, onCancel }: { onOk: () => void; onCancel: () => void })
   };
 
   return (
-    <div className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-8 select-none">
+    <div className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center space-y-8 select-none">
       <div className="text-center">
         <div className="text-sky-300 text-sm uppercase tracking-[0.3em] mb-2">Acceso técnico</div>
         <div className="text-2xl text-white/70">Ingresá el PIN del instalador</div>
       </div>
-      <div className={`flex gap-4 ${err ? 'animate-pulse' : ''}`}>
+      <div className={`flex space-x-4 ${err ? 'animate-pulse' : ''}`}>
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
@@ -415,7 +415,7 @@ function TechPanel({ state, onClose }: { state: MdmState; onClose: () => void })
           <SettingsRow label="Conexión" value={<span className={navigator.onLine ? 'text-emerald-300' : 'text-amber-300'}>{navigator.onLine ? 'En línea' : 'Sin conexión'}</span>} />
         </section>
 
-        <section className="flex flex-col gap-4">
+        <section className="flex flex-col space-y-4">
           <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Servicio</h2>
           <button data-index="1" onClick={() => window.location.reload()} className="w-full text-left rounded-xl bg-white/5 border border-white/10 px-5 py-4 text-xl outline-none focus:bg-white/15 focus:border-white/60">
             Reiniciar la interfaz
@@ -607,7 +607,7 @@ function TvHome({ state }: { state: MdmState }) {
         <span className="text-3xl font-light tabular-nums">{clock}</span>
       </header>
 
-      <div className="px-16 mt-3 flex items-end justify-between gap-6">
+      <div className="px-16 mt-3 flex items-end justify-between space-x-6">
         <div>
           {name ? (
             <>
@@ -627,7 +627,7 @@ function TvHome({ state }: { state: MdmState }) {
         </div>
       )}
 
-      <main className="flex-1 flex flex-col items-center justify-center gap-6">
+      <main className="flex-1 flex flex-col items-center justify-center space-y-6">
         <div
           className="h-44 w-44 rounded-full flex items-center justify-center bg-[radial-gradient(circle_at_35%_30%,rgba(139,92,255,.6),rgba(71,191,255,.22))]"
           aria-hidden
@@ -640,7 +640,7 @@ function TvHome({ state }: { state: MdmState }) {
       <div
         ref={dockRef}
         onKeyDown={onDockKey}
-        className="flex items-center justify-center gap-7 pb-12 px-16 flex-wrap"
+        className="flex items-center justify-center space-x-9 pb-12 px-16 flex-wrap"
         role="menubar"
       >
         {dock.map((app, i) => (

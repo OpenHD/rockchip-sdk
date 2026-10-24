@@ -47,6 +47,9 @@ class MainActivity : Activity() {
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 setSupportMultipleWindows(false)
                 javaScriptCanOpenWindowsAutomatically = false
+                // Agente de TV: YouTube y otros servicios sirven su versión para televisor (control remoto)
+                // en vez de la de celular o escritorio.
+                userAgentString = TV_USER_AGENT
             }
             webViewClient = Client()
             webChromeClient = Chrome()
@@ -187,3 +190,7 @@ class MainActivity : Activity() {
         val MATCH = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }
 }
+
+/** Navegador de Smart TV (Tizen): con él youtube.com/tv abre la interfaz de TV y no la de escritorio. */
+private const val TV_USER_AGENT =
+    "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 76.0.3809.146/6.0 TV Safari/537.36"
