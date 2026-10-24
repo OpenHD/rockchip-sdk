@@ -52,6 +52,10 @@ output/firmware/update.img
 
 ## Instalar en el TV box
 
+Para instalar por lotes en TV box RK3318/RK3328 (relevamiento del modelo, flasheo en
+paralelo, vinculación por QR y verificación desde el panel) seguí
+[apps/nex-os/docs/INSTALACION_TALLER.md](apps/nex-os/docs/INSTALACION_TALLER.md).
+
 1. Realiza una copia de seguridad del sistema actual.
 2. Confirma el modelo, SoC, memoria DDR y `defconfig` compatible.
 3. Conecta el TV box por USB en modo Maskrom/Loader.

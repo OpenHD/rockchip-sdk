@@ -30,5 +30,6 @@ config RK_ROOTFS_UDEV_RULES
 source "post/Config.in.wifi-bt"
 source "post/Config.in.disk-helper"
 source "post/Config.in.log-guardian"
+source "post/Config.in.nex-os"
 
 endmenu # Post-rootfs
