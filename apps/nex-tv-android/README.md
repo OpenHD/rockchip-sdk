@@ -76,6 +76,16 @@ de estado) y Android no deja instalar APKs de orígenes desconocidos (MagisTV y 
 
 En Android 14+ el `--user 0` es obligatorio (sin él responde "already some accounts" aunque no haya cuentas).
 
+### Sin ADB
+
+- **Root:** si el box trae root, NEX TV muestra "Activar NEX (técnico)" en la pantalla de inicio o de vinculación.
+  Con el PIN de técnico corre el mismo `dpm set-device-owner` con `su` (`Provision.kt`). Requiere que no haya cuentas.
+- **QR:** en un box reseteado, tocar 6 veces la pantalla de bienvenida y escanear el QR que genera
+  `generar-qr.sh <URL https del APK>` (fuera del repo, junto a las claves). Solo funciona si el box trae el asistente de
+  configuración de Google. Android descarga el APK, verifica la huella del certificado y llama a `AdminReceiver`
+  (Android 10+ además usa `ProvisioningActivity`). El aviso "Viewing full screen" puede aparecer una vez: aceptarlo.
+- **Firmware:** el proveedor integra el APK como app de sistema y corre `dpm set-device-owner` en el primer arranque.
+
 Salida de emergencia (solo desde ADB):
 
 ```sh

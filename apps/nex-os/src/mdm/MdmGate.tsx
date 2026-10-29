@@ -142,13 +142,65 @@ function WifiEntry({ state, label = 'Configurar Wi-Fi' }: { state: MdmState; lab
   </>;
 }
 
+/** Activación de NEX con root (sin ADB): PIN de técnico y luego `dpm` en el equipo. */
+function RootSetup({ state }: { state: MdmState }) {
+  const button = useRef<HTMLButtonElement>(null);
+  const [step, setStep] = useState<'idle' | 'pin' | 'busy'>('idle');
+  const [message, setMessage] = useState('');
+  const cancel = useCallback(() => { setStep('idle'); window.setTimeout(() => button.current?.focus(), 0); }, []);
+  const activate = useCallback(async () => {
+    setStep('busy');
+    setMessage('Activando… si aparece un cartel de root, aceptalo.');
+    try {
+      const res = await fetch(`/agent/setup/root?token=${encodeURIComponent(state.wifiToken ?? '')}`, { cache: 'no-store' });
+      const data = await res.json();
+      // Si sale bien, NEX TV se reabre solo en modo protegido.
+      setMessage(data.ok ? 'NEX activado. Reiniciando la pantalla…' : data.error || 'No se pudo activar NEX.');
+    } catch {
+      setMessage('No se pudo activar NEX.');
+    }
+    setStep('idle');
+    window.setTimeout(() => button.current?.focus(), 0);
+  }, [state.wifiToken]);
+
+  if (step === 'pin') {
+    return <div className="fixed inset-0 z-50"><TechPin onOk={() => void activate()} onCancel={cancel} /></div>;
+  }
+  return <>
+    <button ref={button} disabled={step === 'busy'} onClick={() => { setMessage(''); setStep('pin'); }} className="text-xl rounded-xl px-5 py-3 border border-amber-300/40 text-amber-100 outline-none focus:bg-white/20 focus:ring-2 focus:ring-sky-300">
+      Activar NEX (técnico)
+    </button>
+    {message && <p role="status" className="text-lg text-amber-100">{message}</p>}
+  </>;
+}
+
+/** Acciones de las pantallas sin escritorio: activar NEX (si falta) y Wi-Fi, con flechas arriba/abajo. */
+function SetupActions({ state }: { state: MdmState }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const move = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>(':scope > button:not(:disabled)') ?? []);
+    const cur = btns.findIndex((b) => b === document.activeElement);
+    if (cur < 0) return;
+    e.preventDefault();
+    btns[Math.min(Math.max(cur + (e.key === 'ArrowDown' ? 1 : -1), 0), btns.length - 1)]?.focus();
+  };
+  return (
+    <div ref={ref} onKeyDown={move} className="flex flex-col items-center space-y-3">
+      {!state.owner && <p className="text-white/50">Instalación incompleta: NEX todavía no protege este equipo.</p>}
+      {!state.owner && state.root && <RootSetup state={state} />}
+      <WifiEntry state={state} />
+    </div>
+  );
+}
+
 function StartingScreen({ state }: { state: MdmState }) {
   return (
     <FullScreen>
       <Brand state={state} />
       <div className="h-10 w-10 rounded-full border-4 border-white/15 border-t-white animate-spin" />
       <p className="text-white/60 text-lg">Iniciando el equipo…</p>
-      <WifiEntry state={state} />
+      <SetupActions state={state} />
     </FullScreen>
   );
 }
@@ -200,7 +252,7 @@ function PairingScreen({ state }: { state: MdmState }) {
           </p>
         )}
       </div>
-      <WifiEntry state={state} />
+      <SetupActions state={state} />
     </FullScreen>
   );
 }

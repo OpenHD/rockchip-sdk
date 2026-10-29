@@ -74,6 +74,13 @@ class UiServer(private val ctx: Context) {
                 }
             }.getOrElse { json(500, JSONObject().put("ok", false).put("error", "Wi-Fi no disponible")) }
         }
+        // Mismo token que el Wi-Fi: solo lo conoce la UI propia (ver Agent.wifiToken).
+        if (path == "/agent/setup/root") {
+            if (!MessageDigest.isEqual(Agent.wifiToken.toByteArray(), url.getQueryParameter("token").orEmpty().toByteArray())) {
+                return json(403, JSONObject().put("ok", false).put("error", "Token inválido"))
+            }
+            return json(200, Provision.ownWithRoot(ctx))
+        }
         if (path == "/agent/ui-state.json") {
             return WebResourceResponse("application/json", "utf-8", 200, "OK", NO_STORE,
                 ByteArrayInputStream(Agent.uiState.toByteArray()))

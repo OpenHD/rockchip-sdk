@@ -390,9 +390,13 @@ object Agent {
             }
         }
         // Nunca se publica el token del MDM ni la configuración cruda.
+        val owner = Kiosk.isOwner(app)
         uiState = JSONObject()
             .put("wifi_token", wifiToken)
             .put("mode", mode)
+            // Sin Device Owner la UI ofrece al técnico activarlo con root (si el equipo lo tiene).
+            .put("owner", owner)
+            .put("root", !owner && Provision.hasRoot())
             .put("updated_at", now())
             .put("logo", logo?.let { "/agent/$it" } ?: JSONObject.NULL)
             .put("company_name", company.opt("name") ?: JSONObject.NULL)

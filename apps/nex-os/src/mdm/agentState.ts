@@ -17,6 +17,10 @@ export interface MdmApp {
 export interface MdmState {
   mode: MdmMode;
   wifiToken: string | null;
+  /** false: NEX todavía no es dueño del equipo (instalación incompleta). */
+  owner: boolean;
+  /** El equipo tiene root: el técnico puede activar NEX desde la TV. */
+  root: boolean;
   logo: string | null;
   companyName: string | null;
   deviceName: string | null;
@@ -40,6 +44,8 @@ const LOCK_KINDS: readonly MdmLockKind[] = ['manual', 'payment', 'clock', 'offli
 const STARTING: MdmState = {
   mode: 'starting',
   wifiToken: null,
+  owner: true,
+  root: false,
   logo: null,
   companyName: null,
   deviceName: null,
@@ -86,6 +92,9 @@ export function parseAgentState(raw: unknown): MdmState {
   return {
     mode,
     wifiToken: str(o.wifi_token, 64),
+    // El agente de Linux no publica "owner": ahí no aplica.
+    owner: o.owner !== false,
+    root: o.root === true,
     logo: logo && /^\/agent\/logo\.(png|jpg|webp)$/.test(logo) ? logo : null,
     companyName: str(o.company_name, 80),
     deviceName: str(o.device_name, 80),

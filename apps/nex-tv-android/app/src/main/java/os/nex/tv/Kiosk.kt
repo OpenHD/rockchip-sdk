@@ -16,8 +16,9 @@ import android.provider.Settings
 import android.util.Log
 
 /**
- * Modo TV cerrado en Android. Requiere que la app sea Device Owner, lo que se hace una sola vez por ADB:
- *   adb shell dpm set-device-owner --user 0 os.nex.tv/.AdminReceiver
+ * Modo TV cerrado en Android. Requiere que la app sea Device Owner, lo que se hace una sola vez:
+ * por ADB (`adb shell dpm set-device-owner --user 0 os.nex.tv/.AdminReceiver`), por QR al configurar
+ * el equipo de fábrica o con root (ver Provision).
  * Sin Device Owner NEX-OS funciona como launcher, pero el usuario puede salir a Android.
  */
 object Kiosk {
@@ -117,7 +118,10 @@ object Kiosk {
     }
 }
 
-class AdminReceiver : DeviceAdminReceiver()
+class AdminReceiver : DeviceAdminReceiver() {
+    // Fin de la instalación por QR: NEX TV abre y aplica las políticas.
+    override fun onProfileProvisioningComplete(context: Context, intent: Intent) = Provision.relaunch(context)
+}
 
 /**
  * Salida de emergencia para el taller. Protegido con el permiso DUMP: solo ADB (shell) o el sistema lo pueden enviar.
