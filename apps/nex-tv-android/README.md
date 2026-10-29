@@ -43,6 +43,21 @@ Android solo acepta actualizaciones firmadas con la misma clave, y el QR de alta
 la clave, los equipos instalados no se pueden volver a actualizar. Sin `NEX_KEYSTORE` el APK se firma con la
 clave de debug de la máquina, que sirve solo para pruebas.
 
+## Actualizaciones
+
+- `NEX_BUILD`: entero positivo sin ceros iniciales (por defecto `1`); es el `versionCode` de Android.
+  Cada release debe aumentarlo.
+- `NEX_VERSION`: versión visible (por defecto `0.1.0`).
+- `NEX_RELEASE_PUB`: ruta a la clave pública RSA SPKI PEM de releases. Para rotación se pueden indicar
+  varias rutas separadas por espacios (las rutas no deben contener espacios). Sin claves, la actualización
+  remota queda desactivada.
+
+Firmar el APK con `tools/nex-os/release/sign-release.sh` (también funciona para un APK) y publicarlo desde
+la página Firmware del panel con plataforma `android`, usando el mismo build que al compilar.
+El agente verifica la firma de release, el tamaño y SHA-256 antes de instalar, incluso sin vincular o bloqueado.
+Android también rechaza actualizaciones que no estén firmadas con el keystore de NEX TV instalado.
+Como Device Owner instala sin interacción; si Android pide confirmación, se registra el fallo sin abrirla.
+
 ## Instalar en el equipo (taller)
 
 Requiere ADB por red o USB y que el equipo **no tenga cuentas** (recién reseteado), si no Android rechaza el Device Owner.
@@ -91,4 +106,3 @@ adb shell am broadcast -a os.nex.tv.RELEASE -n os.nex.tv/.ReleaseReceiver
 
 - Pantalla de Wi-Fi dentro de NEX-OS: en modo kiosko no se puede abrir la configuración de Android.
 - Bloquear el reset de fábrica y ADB (se dejan abiertos para poder recuperar los equipos de prueba).
-- Firma de release propia y actualización remota del APK.

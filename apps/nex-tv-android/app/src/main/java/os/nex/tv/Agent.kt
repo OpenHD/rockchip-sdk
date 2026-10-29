@@ -75,6 +75,7 @@ object Agent {
         if (::app.isInitialized) return
         app = context.applicationContext
         dir = File(app.filesDir, "agent").apply { mkdirs() }
+        Updater.start(app)
         Thread(::main, "nex-agent").apply { isDaemon = true }.start()
     }
 
@@ -227,7 +228,8 @@ object Agent {
             when (status) {
                 "unpaired" -> {}
                 "paired" -> {
-                    resp = rpc("mdm_device_sync", JSONObject().put("p_firmware", firmware())) ?: return false
+                    resp = rpc("mdm_device_sync", JSONObject().put("p_firmware", firmware())
+                        .put("p_status", statusJson())) ?: return false
                     status = resp.optString("status")
                 }
                 else -> return false
@@ -255,6 +257,7 @@ object Agent {
             }
         }
 
+        Updater.offer(app, resp.optJSONObject("update"))
         lastSyncFile.writeAtomic(now().toString())
         val ep = resp.opt("server_epoch")
         if (ep is Number && ep.toLong() > 0) serverEpochFile.writeAtomic(ep.toLong().toString())
@@ -449,6 +452,8 @@ object Agent {
             .put("firewall", false)
             .put("webview_filter", true)
             .put("platform", "android")
+            .put("build", BuildConfig.VERSION_CODE)
+            .put("version", BuildConfig.VERSION_NAME)
             .put("uptime", SystemClock.elapsedRealtime() / 1000)
             .put("free_mb", app.filesDir.usableSpace / (1024 * 1024))
             .put("agent", AGENT_VERSION)
@@ -483,7 +488,7 @@ object Agent {
     // ---- Cola de eventos (se conserva sin internet) ----
 
     @Synchronized
-    private fun addEvent(kind: String, details: JSONObject = JSONObject()) {
+    internal fun addEvent(kind: String, details: JSONObject = JSONObject()) {
         val line = JSONObject().put("kind", kind).put("at", now()).put("details", details).toString()
         val lines = (eventsFile.readOrNull()?.lines()?.filter { it.isNotBlank() } ?: emptyList()) + line
         eventsFile.writeAtomic(lines.takeLast(100).joinToString("\n", postfix = "\n"))

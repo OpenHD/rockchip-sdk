@@ -67,6 +67,11 @@ object Demo {
 class DemoReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (!BuildConfig.DEMO || intent.action != Demo.ACTION) return
+        intent.getStringExtra("update")?.let { text ->
+            runCatching { Updater.offerDemo(context, JSONObject(text)) }
+                .onFailure { Log.w("nex-demo", "update inválido", it) }
+            return
+        }
         val state = intent.getStringExtra("state") ?: return
         if (state !in Demo.STATES) {
             Log.w("nex-demo", "escenario desconocido: $state (opciones: ${Demo.STATES})")

@@ -20,14 +20,16 @@ android {
     compileSdk = 36
 
     defaultConfig {
+        manifestPlaceholders["nexNetworkConfig"] = if (nexProp("nex.demo") == "true") "@xml/network_demo" else "@xml/network_release"
         applicationId = "os.nex.tv"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = nexProp("nex.build").toIntOrNull() ?: 1
+        versionName = nexProp("nex.version").ifEmpty { "0.1.0" }
 
         buildConfigField("String", "MDM_URL", "\"${nexProp("nex.mdmUrl")}\"")
         buildConfigField("String", "MDM_ANON_KEY", "\"${nexProp("nex.mdmAnonKey")}\"")
+        buildConfigField("String", "RELEASE_PUB_KEYS", "\"${nexProp("nex.releasePubKey")}\"")
         // Dominios que siempre se permiten además de Supabase (separados por espacio).
         buildConfigField("String", "BASE_DOMAINS", "\"${nexProp("nex.baseDomains")}\"")
         // Demo sin backend: el agente simula al servidor (ver Demo.kt). Nunca en equipos de clientes.
