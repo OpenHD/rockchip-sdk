@@ -1,6 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import AdminApp from './AdminApp';
+// Antes que admin.css: las variantes hover/focus de Tailwind tienen que poder ganarle al tema claro.
+import './admin-light.css';
 import './admin.css';
 
 // Anti-clickjacking de respaldo: las cabeceras (frame-ancestors / X-Frame-Options) son la

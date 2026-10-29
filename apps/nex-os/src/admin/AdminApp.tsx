@@ -28,6 +28,8 @@ import { SIGNUP_ENABLED, TURNSTILE_SITE_KEY } from './config';
 import Turnstile from './Turnstile';
 import { db, run, type Company } from './api';
 import { FILTERS } from './deviceMeta';
+import DownloadApk from './DownloadApk';
+import ThemeToggle from './ThemeToggle';
 import AlertsPage from './pages/Alerts';
 import AppsPage from './pages/Apps';
 import BrandPage from './pages/Brand';
@@ -111,6 +113,7 @@ function AuthLayout({ title, subtitle, step, children }: { title: string; subtit
         <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-zinc-600">
           <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Acceso protegido con segundo factor
         </p>
+        <ThemeToggle className="mx-auto mt-4 w-fit" />
       </div>
     </div>
   );
@@ -491,7 +494,11 @@ function Shell({ session }: { session: Session }) {
           ))}
         </nav>
       )}
-      <div className="mt-auto flex items-center gap-3 rounded-xl border border-white/[0.06] px-3 py-2.5">
+      <div className="mt-auto flex flex-col gap-2">
+        <DownloadApk />
+        <ThemeToggle />
+      </div>
+      <div className="flex items-center gap-3 rounded-xl border border-white/[0.06] px-3 py-2.5">
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-semibold text-indigo-200">
           {(session.user.email ?? '?').slice(0, 1).toUpperCase()}
         </span>

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { TURNSTILE_SITE_KEY } from './config';
+import { resolvedTheme } from './theme';
 
 interface TurnstileApi {
   render: (el: HTMLElement, opts: Record<string, unknown>) => string;
@@ -42,7 +43,7 @@ export default function Turnstile({ onToken, resetKey }: { onToken: (token: stri
         if (cancelled || !ref.current || !window.turnstile) return;
         widgetId.current = window.turnstile.render(ref.current, {
           sitekey: TURNSTILE_SITE_KEY,
-          theme: 'dark',
+          theme: resolvedTheme(),
           callback: (token: string) => onToken(token),
           'expired-callback': () => onToken(null),
           'error-callback': () => onToken(null),
