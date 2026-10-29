@@ -47,9 +47,21 @@ cp -a "$WEB_OUT"/. "$ASSETS"/
 # el APK ya trae los archivos y un caché viejo podría sobrevivir a una actualización.
 rm -f "$ASSETS/admin.html" "$ASSETS"/assets/admin-* "$ASSETS/sw.js" "$ASSETS"/workbox-*.js
 
+# NEX_KEYSTORE: clave definitiva (contraseña en NEX_KEYSTORE_PASSWORD). Sin ella se firma con la de debug,
+# que sirve para probar pero no para equipos de clientes: después no se podrían actualizar.
+SIGN=()
+if [ -n "${NEX_KEYSTORE:-}" ]; then
+	[ -f "$NEX_KEYSTORE" ] || { echo "NEX_KEYSTORE no existe: $NEX_KEYSTORE" >&2; exit 1; }
+	[ -n "${NEX_KEYSTORE_PASSWORD:-}" ] || { echo "Falta NEX_KEYSTORE_PASSWORD" >&2; exit 1; }
+	SIGN=(-Pnex.keystore="$NEX_KEYSTORE")
+elif [ "$DEMO" = false ]; then
+	echo "AVISO: APK sin NEX_KEYSTORE, firmado con la clave de debug. No instalar en equipos de clientes." >&2
+fi
+
 : "${ANDROID_HOME:=$HOME/Library/Android/sdk}"
 export ANDROID_HOME
 "$DIR/gradlew" -p "$DIR" assembleRelease \
-	-Pnex.mdmUrl="$MDM_URL" -Pnex.mdmAnonKey="$MDM_KEY" -Pnex.baseDomains="${NEX_AGENT_BASE_DOMAINS:-}" -Pnex.demo="$DEMO"
+	-Pnex.mdmUrl="$MDM_URL" -Pnex.mdmAnonKey="$MDM_KEY" -Pnex.baseDomains="${NEX_AGENT_BASE_DOMAINS:-}" -Pnex.demo="$DEMO" \
+	${SIGN[@]+"${SIGN[@]}"}
 
 echo "APK: $DIR/app/build/outputs/apk/release/app-release.apk"

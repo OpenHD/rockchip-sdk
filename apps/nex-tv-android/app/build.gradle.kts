@@ -38,11 +38,29 @@ android {
         buildConfig = true
     }
 
+    // Clave definitiva de NEX TV: los equipos solo aceptan actualizaciones firmadas con la misma clave y el QR
+    // de alta fija su huella. Ruta en nex.keystore; contraseñas por entorno (no quedan en ps ni en el historial).
+    val keystore = nexProp("nex.keystore")
+    signingConfigs {
+        if (keystore.isNotEmpty()) {
+            create("nex") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("NEX_KEYSTORE_PASSWORD")
+                keyAlias = nexProp("nex.keyAlias").ifEmpty { "nex-tv" }
+                keyPassword = System.getenv("NEX_KEY_PASSWORD") ?: System.getenv("NEX_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Prototipo: firmado con la clave de debug para poder instalarlo directo.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (keystore.isNotEmpty()) {
+                signingConfigs.getByName("nex")
+            } else {
+                logger.warn("NEX TV: sin nex.keystore el APK se firma con la clave de debug (solo para pruebas)")
+                signingConfigs.getByName("debug")
+            }
         }
     }
 

@@ -31,7 +31,17 @@ apps/nex-tv-android/build.sh
 - `NEX_OS_SOURCE_DIR`: fuente de NEX-OS (por defecto `apps/nex-os`).
 - `NEX_WEB_TARGET`: navegador objetivo de la web (por defecto `chrome69`, el WebView de Android 9 sin actualizar).
 
-Resultado: `app/build/outputs/apk/release/app-release.apk` (prototipo: firmado con la clave de debug).
+Resultado: `app/build/outputs/apk/release/app-release.apk`.
+
+**Firma.** Para equipos de clientes, compilar siempre con la clave definitiva de NEX TV:
+
+```sh
+NEX_KEYSTORE=/ruta/nex-tv-release.jks NEX_KEYSTORE_PASSWORD=… apps/nex-tv-android/build.sh
+```
+
+Android solo acepta actualizaciones firmadas con la misma clave, y el QR de alta fija su huella: si se pierde
+la clave, los equipos instalados no se pueden volver a actualizar. Sin `NEX_KEYSTORE` el APK se firma con la
+clave de debug de la máquina, que sirve solo para pruebas.
 
 ## Instalar en el equipo (taller)
 
@@ -60,10 +70,11 @@ adb shell am broadcast -a os.nex.tv.RELEASE -n os.nex.tv/.ReleaseReceiver
 ## Play Store y apps Android
 
 - La Play Store es libre para el usuario: aparece como mosaico y lo que instala aparece solo en el escritorio
-  (`AndroidApps.kt`). Las apps de sistema (Configuración, navegador, explorador de archivos) nunca se muestran.
+  (`AndroidApps.kt`). Chrome también aparece si está preinstalado y navega sin el filtro de dominios de NEX.
+  Las demás apps de sistema (Configuración, explorador de archivos) no se muestran.
 - Los mosaicos viajan en `ui-state.json` como apps `web` con `launch_url` `https://appassets.androidplatform.net/android/<paquete>`;
   `UiServer` convierte esa navegación en "abrir la app". La UI web no cambia.
-- El modo kiosko solo deja correr NEX-OS, la Play Store, los servicios de Google y las apps del usuario. El botón Home
+- El modo kiosko solo deja correr NEX-OS, la Play Store, Chrome, los servicios de Google y las apps del usuario. El botón Home
   vuelve a NEX-OS.
 - Al bloquearse el equipo la lista queda solo en NEX-OS: Android cierra la app abierta y no deja abrir otra.
 - Los APK sueltos siguen bloqueados (`DISALLOW_INSTALL_UNKNOWN_SOURCES`).
