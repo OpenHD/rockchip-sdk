@@ -52,14 +52,8 @@ object Demo {
             // Solo apps que tienen sentido en un TV (sin calculadora, fotos de ejemplo, reloj ni calendario).
             .put("apps", JSONArray()
                 .put(web("youtube", "YouTube", "https://www.youtube.com/tv",
-                    "youtube.com", "googlevideo.com", "ytimg.com", "ggpht.com", "gstatic.com"))
-                .put(internal("nexreproductor", "NexReproductor"))
-                .put(internal("games", "Juegos")))
+                    "youtube.com", "googlevideo.com", "ytimg.com", "ggpht.com", "gstatic.com")))
     }
-
-    private fun internal(id: String, name: String) =
-        JSONObject().put("id", id).put("name", name).put("kind", "internal").put("launch_url", JSONObject.NULL)
-            .put("domains", JSONArray())
 
     private fun web(id: String, name: String, url: String, vararg domains: String) =
         JSONObject().put("id", id).put("name", name).put("kind", "web").put("launch_url", url)

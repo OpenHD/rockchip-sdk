@@ -7,13 +7,15 @@ import android.content.pm.PackageManager
 import android.util.Log
 
 /**
- * Apps Android que se muestran en NEX-OS: la Play Store y lo que instaló el usuario.
- * Las apps de sistema (Configuración, navegador, explorador de archivos…) nunca aparecen.
+ * Apps Android que se muestran en NEX-OS: la Play Store, Chrome y lo que instaló el usuario.
+ * Solo se permiten la Play Store y Chrome entre las apps de sistema.
  * Los APK sueltos no se pueden instalar (DISALLOW_INSTALL_UNKNOWN_SOURCES, ver Kiosk).
  */
 object AndroidApps {
     private const val TAG = "nex-apps"
     const val PLAY_STORE = "com.android.vending"
+    const val CHROME = "com.android.chrome"
+    private val ALLOWED_SYSTEM_PACKAGES = setOf(PLAY_STORE, CHROME)
 
     /** Necesarios para que la Play Store pueda iniciar sesión e instalar dentro del modo kiosko. */
     val PLAY_SUPPORT = listOf(PLAY_STORE, "com.google.android.gms", "com.google.android.gsf")
@@ -23,7 +25,7 @@ object AndroidApps {
 
     data class App(val pkg: String, val label: String)
 
-    /** Play Store primero, después las apps del usuario por nombre. */
+    /** Play Store primero, después Chrome y las apps del usuario por nombre. */
     fun list(ctx: Context): List<App> {
         val pm = ctx.packageManager
         val found = LinkedHashMap<String, App>()
@@ -34,7 +36,7 @@ object AndroidApps {
                 val pkg = ai.packageName
                 if (pkg == ctx.packageName || pkg in found) continue
                 val system = ai.flags and ApplicationInfo.FLAG_SYSTEM != 0
-                if (system && pkg != PLAY_STORE) continue
+                if (system && pkg !in ALLOWED_SYSTEM_PACKAGES) continue
                 if (!ai.enabled) continue
                 found[pkg] = App(pkg, ai.loadLabel(pm).toString().trim().ifEmpty { pkg })
             }

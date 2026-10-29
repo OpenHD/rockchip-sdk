@@ -11,8 +11,6 @@ import { useAgentState, type MdmApp, type MdmState } from './agentState';
 
 /** Apps internas que pueden mostrarse en modo TV. Terminal, navegador libre, NEX Code, ajustes, etc. nunca. */
 const TV_SAFE_INTERNAL = new Set([
-  'nexreproductor',
-  'spotify',
   'mediaplayer',
   'media-player',
   'photos',
@@ -20,10 +18,6 @@ const TV_SAFE_INTERNAL = new Set([
   'calculator',
   'clock',
   'calendar',
-  'tetris',
-  'nex-tetris',
-  'games',
-  'nex-games',
 ]);
 
 const BACK_KEYS = new Set(['Escape', 'Backspace', 'BrowserBack', 'GoBack']);
@@ -123,7 +117,7 @@ function Brand({ state, size = 'lg' }: { state: MdmState; size?: 'lg' | 'sm' }) 
   }
   return (
     <div className={`${size === 'lg' ? 'text-5xl' : 'text-xl'} font-bold tracking-widest`}>
-      {state.companyName ?? 'NEX OS'}
+      {state.companyName ?? 'NEX TV'}
     </div>
   );
 }
@@ -238,7 +232,7 @@ function formatDue(date: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
 }
 
-/** Versión de NEX-OS mostrada en Ajustes (se define al compilar la imagen). */
+/** Versión de NEX TV mostrada en Ajustes (se define al compilar la imagen). */
 const NEX_VERSION = (import.meta.env.VITE_NEX_VERSION as string | undefined) ?? '0.1';
 
 /** PIN del acceso técnico (se define al compilar; por defecto, solo para demo). */
@@ -410,7 +404,7 @@ function TechPanel({ state, onClose }: { state: MdmState; onClose: () => void })
           <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Equipo</h2>
           <SettingsRow label="Nombre" value={state.deviceName ?? 'Sin nombre'} />
           <SettingsRow label="Proveedor" value={state.companyName ?? 'NEX'} />
-          <SettingsRow label="NEX-OS" value={`v${NEX_VERSION}`} />
+          <SettingsRow label="NEX TV" value={`v${NEX_VERSION}`} />
           <SettingsRow label="Modo" value={<span className="text-emerald-300">Activo</span>} />
           <SettingsRow label="Conexión" value={<span className={navigator.onLine ? 'text-emerald-300' : 'text-amber-300'}>{navigator.onLine ? 'En línea' : 'Sin conexión'}</span>} />
         </section>
@@ -480,7 +474,7 @@ function SettingsScreen({ state, appearance, setAppearance, onClose }: {
           <SettingsRow label="Nombre" value={state.deviceName ?? 'Sin nombre'} />
           <SettingsRow label="Estado" value={<span className="text-emerald-300">Vinculado</span>} />
           <SettingsRow label="Proveedor" value={state.companyName ?? 'NEX'} />
-          <SettingsRow label="NEX-OS" value={`v${NEX_VERSION}`} />
+          <SettingsRow label="NEX TV" value={`v${NEX_VERSION}`} />
         </section>
 
         <section>
