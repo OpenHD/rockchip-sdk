@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { BadgeCheck, Building2, Cpu, Globe, Pencil, Plus, Rocket, ShieldCheck, Skull } from 'lucide-react';
-import { db, run, type CatalogApp, type Company, type DomainReportRow, type FirmwareRelease, type FirmwareTarget } from '../api';
+import { db, run, type CatalogApp, type Company, type DomainReportRow, type FirmwarePlatform, type FirmwareRelease, type FirmwareTarget } from '../api';
 import { appGradient, formatDate, relativeTime } from '../format';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
@@ -280,24 +280,31 @@ export function PiracyPage() {
 // Firmware (OTA)
 // ---------------------------------------------------------------------------
 
-// RPC de v8 en un solo lugar (contrato NEX MDM v8).
+// RPC de OTA en un solo lugar (contrato NEX MDM v8, con plataforma desde v11).
 const listReleases = () => run<FirmwareRelease[]>(db().rpc('mdm_list_releases'));
 const listTargets = () => run<FirmwareTarget[]>(db().rpc('mdm_list_firmware_targets'));
-const publishRelease = (r: { version: string; build: number; url: string; sha256: string; size: number; sig: string; notes: string | null }) =>
+const publishRelease = (r: { version: string; build: number; url: string; sha256: string; size: number; sig: string; notes: string | null; platform: FirmwarePlatform }) =>
   run<string>(
     db().rpc('mdm_publish_release', {
       p_version: r.version, p_build: r.build, p_url: r.url, p_sha256: r.sha256, p_size: r.size, p_sig: r.sig, p_notes: r.notes,
+      p_platform: r.platform,
     }),
   );
-const setFirmwareTarget = (company: string | null, release: string | null) =>
-  run(db().rpc('mdm_set_firmware_target', { p_company: company, p_release: release }));
+const setFirmwareTarget = (company: string | null, release: string | null, platform: FirmwarePlatform) =>
+  run(db().rpc('mdm_set_firmware_target', { p_company: company, p_release: release, p_platform: platform }));
+
+const PLATFORMS: { id: FirmwarePlatform; label: string; hint: string }[] = [
+  { id: 'android', label: 'Android', hint: 'APK de NEX TV' },
+  { id: 'linux', label: 'Linux', hint: 'Imagen de firmware' },
+];
+const platformLabel = (p: FirmwarePlatform) => PLATFORMS.find((x) => x.id === p)?.label ?? p;
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
-const EMPTY_RELEASE = { version: '', build: '', url: '', sha256: '', size: '', sig: '', notes: '' };
+const EMPTY_RELEASE = { version: '', build: '', url: '', sha256: '', size: '', sig: '', notes: '', platform: 'android' };
 
 function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
@@ -319,8 +326,9 @@ function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
         size: Number(f.size),
         sig: f.sig.replace(/\s+/g, ''),
         notes: f.notes.trim() || null,
+        platform: f.platform as FirmwarePlatform,
       }));
-      toast.show(`Release ${f.version} (build ${f.build}) publicado. Asignalo para distribuirlo.`);
+      toast.show(`Release ${f.version} (${platformLabel(f.platform as FirmwarePlatform)}, build ${f.build}) publicado. Asignalo para distribuirlo.`);
       onDone();
       onClose();
     } catch (err) {
@@ -332,12 +340,17 @@ function PublishModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
   return (
     <Modal title="Publicar release" description="Firmado offline con la clave de releases. Publicar no lo distribuye: hay que asignarlo." onClose={onClose} width="max-w-2xl">
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="Plataforma" hint="El build es independiente en cada plataforma.">
+          <select className={inputClass} value={f.platform} onChange={set('platform')}>
+            {PLATFORMS.map((p) => <option key={p.id} value={p.id}>{p.label} ({p.hint})</option>)}
+          </select>
+        </Field>
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Versión"><input className={`${inputClass} font-mono`} required pattern="[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}" value={f.version} onChange={set('version')} placeholder="1.4.0" /></Field>
           <Field label="Build" hint="Entero, mayor que el anterior"><input className={`${inputClass} font-mono`} required type="number" min={1} step={1} value={f.build} onChange={set('build')} /></Field>
           <Field label="Tamaño (bytes)"><input className={`${inputClass} font-mono`} required type="number" min={1} step={1} value={f.size} onChange={set('size')} /></Field>
         </div>
-        <Field label="URL de descarga"><input className={`${inputClass} font-mono text-xs`} required type="url" pattern="https://.*" value={f.url} onChange={set('url')} placeholder="https://…/nex-os-1.4.0.img" /></Field>
+        <Field label="URL de descarga"><input className={`${inputClass} font-mono text-xs`} required type="url" pattern="https://.*" value={f.url} onChange={set('url')} placeholder={f.platform === 'android' ? 'https://…/nex-tv-0.2.0.apk' : 'https://…/nex-os-1.4.0.img'} /></Field>
         <Field label="SHA-256"><input className={`${inputClass} font-mono text-xs`} required pattern="[0-9a-fA-F]{64}" value={f.sha256} onChange={set('sha256')} /></Field>
         <Field label="Firma (base64)" hint="RS256 sobre nex-update:v1:<build>:<sha256> con la clave de releases.">
           <textarea className={`${inputClass} font-mono text-xs`} required rows={4} value={f.sig} onChange={set('sig')} />
@@ -370,6 +383,7 @@ export function FirmwarePage({ companies }: { companies: Company[] }) {
   const [releases, setReleases] = useState<FirmwareRelease[] | null>(null);
   const [targets, setTargets] = useState<FirmwareTarget[]>([]);
   const [publishing, setPublishing] = useState(false);
+  const [platform, setPlatform] = useState<FirmwarePlatform>('android');
   const [tick, setTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -389,15 +403,18 @@ export function FirmwarePage({ companies }: { companies: Company[] }) {
     };
   }, [tick]);
 
-  const targetOf = (company: string | null) => targets.find((t) => t.company_id === company)?.release_id ?? null;
-  const global = targets.find((t) => t.company_id === null) ?? null;
+  const platformTargets = targets.filter((t) => t.platform === platform);
+  const platformReleases = (releases ?? []).filter((r) => r.platform === platform);
+  const targetOf = (company: string | null) => platformTargets.find((t) => t.company_id === company)?.release_id ?? null;
+  const isGlobal = (r: FirmwareRelease) => targets.some((t) => t.company_id === null && t.release_id === r.id);
 
   const assign = async (company: Company | null, release: string | null) => {
+    const label = platformLabel(platform);
     try {
-      await stepUp.guard(() => setFirmwareTarget(company?.id ?? null, release));
+      await stepUp.guard(() => setFirmwareTarget(company?.id ?? null, release, platform));
       const r = releases?.find((x) => x.id === release);
-      const who = company ? company.name : 'todos los equipos';
-      toast.show(r ? `${who}: build ${r.build} asignado` : company ? `${company.name} vuelve a usar el firmware global` : 'Sin firmware global asignado');
+      const who = company ? company.name : `todos los equipos ${label}`;
+      toast.show(r ? `${who}: build ${r.build} asignado` : company ? `${company.name} vuelve a usar el ${label} global` : `Sin release ${label} global asignado`);
     } catch (err) {
       toast.show((err as Error).message, 'error');
     }
@@ -424,8 +441,9 @@ export function FirmwarePage({ companies }: { companies: Company[] }) {
                 <li key={r.id} className="flex flex-col gap-1 px-5 py-3">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-semibold text-zinc-100">{r.version}</span>
+                    <Badge tone={r.platform === 'android' ? 'success' : 'neutral'}>{platformLabel(r.platform)}</Badge>
                     <Badge>build {r.build}</Badge>
-                    {global?.release_id === r.id && <Badge tone="info">Global</Badge>}
+                    {isGlobal(r) && <Badge tone="info">Global</Badge>}
                     {targets.some((t) => t.company_id && t.release_id === r.id) && (
                       <Badge tone="neutral">{targets.filter((t) => t.company_id && t.release_id === r.id).length} empresas</Badge>
                     )}
@@ -438,11 +456,16 @@ export function FirmwarePage({ companies }: { companies: Company[] }) {
             </ul>
           )}
         </Card>
-        <Card title="Distribución" description="Una empresa con firmware propio ignora el global." className="xl:col-span-2">
+        <Card title="Distribución" description="Cada plataforma se asigna por separado. Una empresa con release propio ignora el global." className="xl:col-span-2">
           <div className="flex flex-col gap-4">
+            <div role="group" aria-label="Plataforma" className="flex gap-2">
+              {PLATFORMS.map((p) => (
+                <Chip key={p.id} active={platform === p.id} onClick={() => setPlatform(p.id)}>{p.label}</Chip>
+              ))}
+            </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-zinc-300">Global (todas las empresas)</span>
-              <TargetSelect value={targetOf(null)} releases={releases ?? []} noneLabel="Ninguno" onChange={(v) => assign(null, v)} />
+              <TargetSelect value={targetOf(null)} releases={platformReleases} noneLabel="Ninguno" onChange={(v) => assign(null, v)} />
             </div>
             <div className="border-t border-white/[0.06] pt-4">
               <div className="mb-2 text-xs font-medium text-zinc-300">Por empresa</div>
@@ -450,7 +473,7 @@ export function FirmwarePage({ companies }: { companies: Company[] }) {
                 {companies.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-3">
                     <span className="truncate text-sm text-zinc-200">{c.name}</span>
-                    <TargetSelect value={targetOf(c.id)} releases={releases ?? []} noneLabel="Usa el global" onChange={(v) => assign(c, v)} />
+                    <TargetSelect value={targetOf(c.id)} releases={platformReleases} noneLabel="Usa el global" onChange={(v) => assign(c, v)} />
                   </li>
                 ))}
               </ul>

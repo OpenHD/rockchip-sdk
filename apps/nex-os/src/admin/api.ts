@@ -161,6 +161,9 @@ export interface NewApiKey {
   prefix: string;
 }
 
+/** Plataforma de un release (v11): imagen de firmware Linux o APK de NEX TV para Android. */
+export type FirmwarePlatform = 'linux' | 'android';
+
 export interface FirmwareRelease {
   id: string;
   version: string;
@@ -171,9 +174,10 @@ export interface FirmwareRelease {
   sig: string;
   notes: string | null;
   created_at: string;
+  platform: FirmwarePlatform;
 }
 
-/** company_id null = target global. */
+/** company_id null = target global. Hay un target por empresa y plataforma. */
 export interface FirmwareTarget {
   company_id: string | null;
   company_name: string | null;
@@ -181,6 +185,7 @@ export interface FirmwareTarget {
   version: string;
   build: number;
   updated_at: string;
+  platform: FirmwarePlatform;
 }
 
 export interface Member {
