@@ -692,8 +692,19 @@ function DeviceDrawer({
           <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Seguridad y salud</h3>
           <div className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] px-4">
             <HealthRow ok={h.hardened} label="Modo TV cerrado" />
-            <HealthRow ok={h.dns_filter} label="Filtro DNS anti-piratería" />
-            <HealthRow ok={h.firewall} label="Firewall" />
+            {h.platform === 'android' ? (
+              <>
+                <HealthRow ok={h.webview_filter} label="Filtro anti-piratería en apps de NEX TV" />
+                {/* Chrome y las apps de la Play Store navegan sin filtro: Android no permite DNS ni firewall de sistema. */}
+                <HealthRow ok={undefined} label="Filtro en Chrome y apps de Play Store" detail="No disponible en Android" />
+                {h.version && <HealthRow ok={undefined} label="Versión de NEX TV" detail={`${h.version} (build ${h.build ?? '—'})`} />}
+              </>
+            ) : (
+              <>
+                <HealthRow ok={h.dns_filter} label="Filtro DNS anti-piratería" />
+                <HealthRow ok={h.firewall} label="Firewall" />
+              </>
+            )}
             <HealthRow ok={undefined} label="Encendido hace" detail={formatUptime(h.uptime)} />
             <HealthRow ok={undefined} label="Espacio libre" detail={h.free_mb ? `${(h.free_mb / 1024).toFixed(1)} GB` : '—'} />
           </div>

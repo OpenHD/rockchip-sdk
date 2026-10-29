@@ -32,6 +32,11 @@ export interface DeviceHealth {
   hardened?: boolean;
   dns_filter?: boolean;
   firewall?: boolean;
+  /** Android: filtro anti-piratería dentro de las apps de NEX TV (no hay DNS ni firewall de sistema). */
+  webview_filter?: boolean;
+  platform?: string;
+  build?: number;
+  version?: string;
   uptime?: number;
   free_mb?: number;
   agent?: number;
