@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import WifiScreen from './WifiScreen';
 import qrcode from 'qrcode-generator';
 import AppRegistry from '../components/AppRegistry';
 import { useAgentState, type MdmApp, type MdmState } from './agentState';
@@ -130,12 +131,24 @@ function FullScreen({ children }: { children: ReactNode }) {
   );
 }
 
+function WifiEntry({ state, label = 'Configurar Wi-Fi' }: { state: MdmState; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => { setOpen(false); button.current?.focus(); }, []);
+  useEffect(() => { if (label === 'Configurar Wi-Fi') button.current?.focus(); }, [label]);
+  return <>
+    <button ref={button} data-index="4" onClick={() => setOpen(true)} className="text-xl rounded-xl px-5 py-3 mt-4 border border-white/20 outline-none focus:bg-white/20 focus:ring-2 focus:ring-sky-300">{label}</button>
+    {open && <WifiScreen token={state.wifiToken} onClose={close} />}
+  </>;
+}
+
 function StartingScreen({ state }: { state: MdmState }) {
   return (
     <FullScreen>
       <Brand state={state} />
       <div className="h-10 w-10 rounded-full border-4 border-white/15 border-t-white animate-spin" />
       <p className="text-white/60 text-lg">Iniciando el equipo…</p>
+      <WifiEntry state={state} />
     </FullScreen>
   );
 }
@@ -187,6 +200,7 @@ function PairingScreen({ state }: { state: MdmState }) {
           </p>
         )}
       </div>
+      <WifiEntry state={state} />
     </FullScreen>
   );
 }
@@ -213,6 +227,7 @@ function LockScreen({ state }: { state: MdmState }) {
         {detail && <p className="text-lg text-white/50">{detail}</p>}
       </div>
       {state.deviceName && <p className="text-white/30 text-sm">Equipo: {state.deviceName}</p>}
+      <WifiEntry state={state} />
     </FullScreen>
   );
 }
@@ -483,9 +498,7 @@ function SettingsScreen({ state, appearance, setAppearance, onClose }: {
             label="Conexión"
             value={<span className={online ? 'text-emerald-300' : 'text-amber-300'}>{online ? 'Conectado' : 'Sin conexión'}</span>}
           />
-          <p className="text-white/40 text-base mt-4 leading-relaxed">
-            La red la administra tu proveedor. Para cambiar el Wi-Fi, comunicate con soporte.
-          </p>
+          <WifiEntry state={state} label="Cambiar red Wi-Fi" />
         </section>
 
         <section className="col-span-2">

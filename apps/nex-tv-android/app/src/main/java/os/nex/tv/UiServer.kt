@@ -6,6 +6,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
+import java.security.MessageDigest
+import org.json.JSONObject
 
 /**
  * Sirve NEX-OS desde los assets del APK en un origen https propio (equivale al
@@ -34,7 +36,7 @@ class UiServer(private val ctx: Context) {
 
     fun intercept(url: Uri): WebResourceResponse? {
         val host = url.host
-        if (url.scheme == "https" && host == HOST) return serveLocal(url.path ?: "/")
+        if (url.scheme == "https" && host == HOST) return serveLocal(url)
         if ((url.scheme == "https" || url.scheme == "wss") && Agent.isAllowed(host)) return null
         if (url.scheme == "data" || url.scheme == "blob") return null
         Agent.recordBlocked(host)
@@ -55,7 +57,23 @@ class UiServer(private val ctx: Context) {
         return true
     }
 
-    private fun serveLocal(path: String): WebResourceResponse {
+    private fun serveLocal(url: Uri): WebResourceResponse {
+        val path = url.path ?: "/"
+        if (path.startsWith("/agent/wifi/")) {
+            if (path == "/agent/wifi/connect" && !MessageDigest.isEqual(
+                    Agent.wifiToken.toByteArray(), url.getQueryParameter("token").orEmpty().toByteArray())) {
+                return json(403, JSONObject().put("ok", false).put("error", "Token inválido"))
+            }
+            return runCatching {
+                when (path) {
+                    "/agent/wifi/status" -> json(200, Wifi.status(ctx))
+                    "/agent/wifi/scan" -> json(200, Wifi.scan(ctx))
+                    "/agent/wifi/connect" -> json(200, Wifi.connect(ctx,
+                        url.getQueryParameter("ssid").orEmpty(), url.getQueryParameter("password").orEmpty()))
+                    else -> json(404, JSONObject().put("error", "No encontrado"))
+                }
+            }.getOrElse { json(500, JSONObject().put("ok", false).put("error", "Wi-Fi no disponible")) }
+        }
         if (path == "/agent/ui-state.json") {
             return WebResourceResponse("application/json", "utf-8", 200, "OK", NO_STORE,
                 ByteArrayInputStream(Agent.uiState.toByteArray()))
@@ -85,6 +103,11 @@ class UiServer(private val ctx: Context) {
             }
         }
     }
+
+    private fun json(code: Int, body: JSONObject) = WebResourceResponse(
+        "application/json", "utf-8", code, if (code == 200) "OK" else "Error", NO_STORE,
+        ByteArrayInputStream(body.toString().toByteArray()),
+    )
 
     private fun mime(name: String) = MIME[name.substringAfterLast('.').lowercase()] ?: "application/octet-stream"
 

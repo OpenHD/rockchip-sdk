@@ -16,6 +16,7 @@ export interface MdmApp {
 
 export interface MdmState {
   mode: MdmMode;
+  wifiToken: string | null;
   logo: string | null;
   companyName: string | null;
   deviceName: string | null;
@@ -38,6 +39,7 @@ const LOCK_KINDS: readonly MdmLockKind[] = ['manual', 'payment', 'clock', 'offli
 
 const STARTING: MdmState = {
   mode: 'starting',
+  wifiToken: null,
   logo: null,
   companyName: null,
   deviceName: null,
@@ -83,6 +85,7 @@ export function parseAgentState(raw: unknown): MdmState {
   const lockKind = LOCK_KINDS.find((k) => k === o.lock_kind) ?? null;
   return {
     mode,
+    wifiToken: str(o.wifi_token, 64),
     logo: logo && /^\/agent\/logo\.(png|jpg|webp)$/.test(logo) ? logo : null,
     companyName: str(o.company_name, 80),
     deviceName: str(o.device_name, 80),

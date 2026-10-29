@@ -53,8 +53,11 @@ object Agent {
     private val demoStateFile get() = File(dir, "demo_state")
     val logoDir: File get() = File(dir, "branding")
 
+    val wifiToken: String = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        .joinToString("") { "%02x".format(it.toInt() and 255) }
+
     /** Estado publicado para la UI (/agent/ui-state.json). */
-    @Volatile var uiState: String = JSONObject().put("mode", "starting").toString()
+    @Volatile var uiState: String = JSONObject().put("mode", "starting").put("wifi_token", wifiToken).toString()
         private set
     @Volatile var mode: String = "starting"
         private set
@@ -386,8 +389,9 @@ object Agent {
                     .put("kind", "web").put("launch_url", "${UiServer.ORIGIN}${AndroidApps.LAUNCH_PREFIX}${a.pkg}"))
             }
         }
-        // Nunca se publica el token ni la configuración cruda.
+        // Nunca se publica el token del MDM ni la configuración cruda.
         uiState = JSONObject()
+            .put("wifi_token", wifiToken)
             .put("mode", mode)
             .put("updated_at", now())
             .put("logo", logo?.let { "/agent/$it" } ?: JSONObject.NULL)

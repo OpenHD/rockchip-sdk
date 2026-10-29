@@ -1,5 +1,6 @@
 package os.nex.tv
 
+import android.Manifest
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.admin.DeviceAdminReceiver
@@ -11,6 +12,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.UserManager
+import android.provider.Settings
 import android.util.Log
 
 /**
@@ -41,6 +43,15 @@ object Kiosk {
         if (!isOwner(activity)) return
         val dpm = dpm(activity)
         val admin = admin(activity)
+        runCatching {
+            dpm.setPermissionGrantState(admin, activity.packageName, Manifest.permission.ACCESS_FINE_LOCATION,
+                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
+        }.onFailure { Log.w(TAG, "no se pudo conceder ubicación", it) }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 30) dpm.setLocationEnabled(admin, true)
+            else dpm.setSecureSetting(admin, Settings.Secure.LOCATION_MODE,
+                Settings.Secure.LOCATION_MODE_HIGH_ACCURACY.toString())
+        }.onFailure { Log.w(TAG, "no se pudo activar ubicación para buscar redes", it) }
         runCatching {
             syncPackages(activity)
             if (Build.VERSION.SDK_INT >= 28) {
