@@ -4,7 +4,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import android.util.Log
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Apps Android que se muestran en NEX-OS: la Play Store, Chrome y lo que instaló el usuario.
@@ -22,6 +27,15 @@ object AndroidApps {
 
     /** Prefijo de URL con el que la UI pide abrir una app Android (lo atrapa UiServer). */
     const val LAUNCH_PREFIX = "/android/"
+
+    /** Prefijo de URL del ícono real de una app Android (lo sirve UiServer). */
+    const val ICON_PREFIX = "/agent/icon/"
+
+    /** Lado del PNG: alcanza para el círculo destacado del home en 1080p. */
+    private const val ICON_PX = 160
+
+    /** Íconos ya dibujados, por paquete y versión: no se redibujan cada vez que vuelve el home. */
+    private val icons = ConcurrentHashMap<String, ByteArray>()
 
     data class App(val pkg: String, val label: String)
 
@@ -57,5 +71,21 @@ object AndroidApps {
         return runCatching { ctx.startActivity(intent) }
             .onFailure { Log.w(TAG, "no se pudo abrir $pkg", it) }
             .isSuccess
+    }
+
+    /** Ícono real de la app como PNG; null si no está en la lista (no se sirven otros paquetes). */
+    fun iconPng(ctx: Context, pkg: String): ByteArray? {
+        if (list(ctx).none { it.pkg == pkg }) return null
+        val pm = ctx.packageManager
+        return runCatching {
+            icons.getOrPut("$pkg@${pm.getPackageInfo(pkg, 0).lastUpdateTime}") { png(pm.getApplicationIcon(pkg)) }
+        }.onFailure { Log.w(TAG, "sin ícono para $pkg", it) }.getOrNull()
+    }
+
+    private fun png(icon: Drawable): ByteArray {
+        val bitmap = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888)
+        icon.setBounds(0, 0, ICON_PX, ICON_PX)
+        icon.draw(Canvas(bitmap))
+        return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
     }
 }

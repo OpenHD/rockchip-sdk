@@ -85,6 +85,10 @@ class UiServer(private val ctx: Context) {
             return WebResourceResponse("application/json", "utf-8", 200, "OK", NO_STORE,
                 ByteArrayInputStream(Agent.uiState.toByteArray()))
         }
+        if (path.startsWith(AndroidApps.ICON_PREFIX)) {
+            val png = AndroidApps.iconPng(ctx, path.removePrefix(AndroidApps.ICON_PREFIX)) ?: return text(404, "Not found")
+            return WebResourceResponse("image/png", null, 200, "OK", NO_STORE, ByteArrayInputStream(png))
+        }
         if (path.startsWith("/agent/")) {
             val logo = Agent.currentLogo()
             if (logo != null && path == "/agent/${logo.name}") {

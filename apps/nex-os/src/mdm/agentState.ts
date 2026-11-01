@@ -12,6 +12,8 @@ export interface MdmApp {
   name: string;
   kind: 'web' | 'internal';
   launch_url: string | null;
+  /** Ícono real de una app Android, servido por el agente. null: la UI dibuja uno de línea. */
+  icon: string | null;
 }
 
 export interface MdmState {
@@ -78,7 +80,9 @@ function parseApp(v: unknown): MdmApp | null {
       return null;
     }
   }
-  return { id, name, kind: o.kind, launch_url: launchUrl };
+  // Solo la ruta local del agente: por este campo la UI no carga imágenes de afuera.
+  const icon = typeof o.icon === 'string' && /^\/agent\/icon\/[\w.]+$/.test(o.icon) ? o.icon : null;
+  return { id, name, kind: o.kind, launch_url: launchUrl, icon };
 }
 
 /** Valida todo lo que llega del archivo: ante cualquier duda, 'starting' (pantalla de espera). */

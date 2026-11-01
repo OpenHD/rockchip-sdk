@@ -57,8 +57,16 @@ function iconKey(app: { id: string; name: string }): string | null {
 
 const ICON_SIZE = { sm: 'h-7 w-7', md: 'h-10 w-10', lg: 'h-20 w-20' } as const;
 const LETTER_SIZE = { sm: 'text-3xl', md: 'text-4xl', lg: 'text-7xl' } as const;
+// El ícono real de una app llena más el círculo que uno de línea.
+const IMAGE_SIZE = { sm: 'h-12 w-12', md: 'h-14 w-14', lg: 'h-28 w-28' } as const;
 
-function AppIcon({ app, size = 'md' }: { app: { id: string; name: string }; size?: keyof typeof ICON_SIZE }) {
+function AppIcon({ app, size = 'md' }: { app: { id: string; name: string; icon?: string | null }; size?: keyof typeof ICON_SIZE }) {
+  // Si la imagen falla (por ejemplo, la app se desinstaló), vuelve al ícono de línea.
+  const [failed, setFailed] = useState<string | null>(null);
+  const src = app.icon;
+  if (src && src !== failed) {
+    return <img src={src} alt="" className={`${IMAGE_SIZE[size]} object-contain`} onError={() => setFailed(src)} />;
+  }
   const key = iconKey(app);
   if (!key) {
     return <span className={LETTER_SIZE[size]}>{app.name.charAt(0).toUpperCase()}</span>;
@@ -569,7 +577,7 @@ function SettingsScreen({ state, appearance, setAppearance, onClose }: {
   );
 }
 
-const SETTINGS_ITEM: MdmApp = { id: 'ajustes', name: 'Ajustes', kind: 'internal', launch_url: null };
+const SETTINGS_ITEM: MdmApp = { id: 'ajustes', name: 'Ajustes', kind: 'internal', launch_url: null, icon: null };
 
 function TvHome({ state }: { state: MdmState }) {
   const clock = useClock();

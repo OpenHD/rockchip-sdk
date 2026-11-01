@@ -382,11 +382,12 @@ object Agent {
                     .put("kind", a.opt("kind")).put("launch_url", a.opt("launch_url")))
             }
             // Play Store y apps instaladas por el usuario. Viajan como "web" con una URL del origen
-            // local que UiServer convierte en "abrir la app": la UI no necesita cambios.
+            // local que UiServer convierte en "abrir la app", y con su ícono real (también de UiServer).
             for (a in AndroidApps.list(app)) {
                 apps.put(JSONObject()
                     .put("id", "android:${a.pkg}".take(41)).put("name", a.label.take(60))
-                    .put("kind", "web").put("launch_url", "${UiServer.ORIGIN}${AndroidApps.LAUNCH_PREFIX}${a.pkg}"))
+                    .put("kind", "web").put("launch_url", "${UiServer.ORIGIN}${AndroidApps.LAUNCH_PREFIX}${a.pkg}")
+                    .put("icon", "${AndroidApps.ICON_PREFIX}${a.pkg}"))
             }
         }
         // Nunca se publica el token del MDM ni la configuración cruda.
