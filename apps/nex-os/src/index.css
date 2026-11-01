@@ -742,6 +742,12 @@ button:active {
   }
 }
 
+/* NEX TV (MDM build): the TV screens are laid out for a 1920px-wide canvas, but Android TV
+   boxes report 960x540 CSS px (320 dpi). The root scales with the width: 15px at 1920, 7.5px at 960. */
+html.nex-tv {
+  font-size: calc(100vw / 128);
+}
+
 /* Short Height Screens */
 @media (max-height: 600px) {
   :root {
