@@ -135,6 +135,9 @@ adb shell am broadcast -a os.nex.tv.RELEASE -n os.nex.tv/.ReleaseReceiver
 
 ## Diferencias con la versión Linux
 
+- **Inicio:** muestra solo las apps Android (Play Store y las instaladas, con su ícono) y Ajustes. Las apps web del
+  catálogo de la empresa no aparecen: el WebView no tiene Widevine y no reproduce Netflix, Disney+, Prime Video ni
+  Spotify. Para ofrecer un servicio en el box, se instala su app Android.
 - **Filtro:** el WebView bloquea toda petición y navegación fuera de la lista blanca (más Supabase), y registra
   el dominio para el reporte anti-piratería. No hay dnsmasq ni iptables: el equipo informa `dns_filter: false`,
   `firewall: false` y `webview_filter: true`.

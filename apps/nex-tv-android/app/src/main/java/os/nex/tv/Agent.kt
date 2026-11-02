@@ -374,15 +374,10 @@ object Agent {
         val logo = currentLogo()?.name
         val apps = JSONArray()
         if (mode == "active") {
-            val src = cfg.optJSONArray("apps") ?: JSONArray()
-            for (i in 0 until src.length()) {
-                val a = src.optJSONObject(i) ?: continue
-                apps.put(JSONObject()
-                    .put("id", a.opt("id")).put("name", a.opt("name"))
-                    .put("kind", a.opt("kind")).put("launch_url", a.opt("launch_url")))
-            }
-            // Play Store y apps instaladas por el usuario. Viajan como "web" con una URL del origen
-            // local que UiServer convierte en "abrir la app", y con su ícono real (también de UiServer).
+            // Solo las apps Android (Play Store y las instaladas), con su ícono real. Las web del catálogo de la
+            // empresa no se muestran: el WebView no tiene Widevine y no reproduce Netflix, Disney+, Prime Video
+            // ni Spotify (la versión Linux sí las muestra). Viajan como "web" con una URL del origen local que
+            // UiServer convierte en "abrir la app".
             for (a in AndroidApps.list(app)) {
                 apps.put(JSONObject()
                     .put("id", "android:${a.pkg}".take(41)).put("name", a.label.take(60))
