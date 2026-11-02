@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -9,6 +10,13 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Serie del equipo para el hardware_id (solo se concede siendo Device Owner). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Solo como app de sistema privilegiada (install-system.sh): actualizarse sin confirmación y volver a
+         proteger el equipo después de un reset de fábrica (Heal). Instalada como app común, Android no los da. -->
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_TIME_ZONE" tools:ignore="ProtectedPermissions" />
 
     <!-- Para listar la Play Store y las apps del usuario como mosaicos de NEX-OS. -->
     <queries>
@@ -79,6 +87,12 @@
         </activity>
 
         <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <!-- Al arrancar: como app de sistema, NEX vuelve a dejar el equipo protegido (Heal). -->
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <receiver android:name=".PackageReplacedReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />

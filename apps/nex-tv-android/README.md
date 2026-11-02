@@ -60,7 +60,36 @@ Como Device Owner instala sin interacción; si Android pide confirmación, se re
 
 ## Instalar en el equipo (taller)
 
-Requiere ADB por red o USB y que el equipo **no tenga cuentas** (recién reseteado), si no Android rechaza el Device Owner.
+`install-box.sh` hace todo en un paso: instala el APK, deja NEX como pantalla de inicio, desactiva el adware de fábrica
+conocido, fija la zona horaria, activa la protección (`Guard`), hace a NEX dueño del equipo si el firmware lo permite,
+verifica todo y al final apaga el ADB. Si alguna verificación falla, el ADB queda abierto para corregir.
+
+```sh
+apps/nex-tv-android/install-box.sh <ip-del-equipo>:<puerto> --apk nex-tv.apk
+```
+
+`--dry-run` muestra qué haría sin tocar el equipo. `--keep-adb` deja el ADB abierto (pruebas en el taller).
+
+**Firmwares sin Device Owner.** Algunos boxes no declaran `android.software.device_admin` (por ejemplo el TX6698 con
+Hi3798MV300H) y `dpm set-device-owner` falla siempre. Ahí protege `Guard`, un servicio de accesibilidad que vuelve al
+inicio si se abre una app no permitida (Ajustes de Android, otro launcher) y, con el equipo bloqueado o sin vincular,
+solo deja NEX. Es más débil que el kiosko: no evita el reset con el botón físico y NEX no se actualiza solo, porque
+Android pide confirmar cada instalación. Para volver a entrar con el ADB apagado: PIN técnico → "Abrir Ajustes de
+Android (10 min)" → Preferencias del dispositivo → Opciones de desarrollador → Depuración USB.
+
+**NEX como app de sistema (firmwares de prueba).** Si el firmware es `userdebug` y trae `su`, `install-system.sh`
+copia NEX a `/system/priv-app` antes de `install-box.sh`. Así sobrevive a un reset de fábrica (que solo borra los
+datos), se actualiza sola sin pedir confirmación (`INSTALL_PACKAGES`) y al arrancar `Heal` vuelve a proteger el
+equipo: desactiva el adware y el launcher de fábrica, activa `Guard` y fija la zona horaria. Después de un reset
+vuelve a la pantalla de vinculación: hasta que la empresa lo vincule, solo se puede usar NEX. `--device-admin` además
+declara `android.software.device_admin`. Escribe en la partición del sistema: tener a mano el firmware original.
+
+```sh
+apps/nex-tv-android/install-system.sh <ip-del-equipo>:<puerto> --apk nex-tv.apk
+```
+
+**A mano, con Device Owner.** Requiere ADB por red o USB y que el equipo **no tenga cuentas** (recién reseteado), si
+no Android rechaza el Device Owner.
 
 ```sh
 adb connect <ip-del-equipo>:5555
