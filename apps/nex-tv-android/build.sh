@@ -1,6 +1,6 @@
 #!/bin/bash
 # Compila NEX-OS (modo MDM) y lo empaqueta en el APK de Android.
-#   NEX_MDM_URL=https://<proyecto>.supabase.co NEX_MDM_ANON_KEY=<clave> apps/nex-tv-android/build.sh
+#   NEX_MDM_URL=https://<proyecto>.supabase.co NEX_MDM_ANON_KEY=<clave> NEX_TECH_PIN=<4 dígitos> apps/nex-tv-android/build.sh
 # Resultado: apps/nex-tv-android/app/build/outputs/apk/release/app-release.apk
 set -euo pipefail
 
@@ -42,6 +42,13 @@ command -v npm >/dev/null || { echo "Node.js/npm are required" >&2; exit 1; }
 [ -f "$SOURCE_DIR/package.json" ] || { echo "NEX-OS source not found in $SOURCE_DIR (set NEX_OS_SOURCE_DIR)" >&2; exit 1; }
 
 export VITE_NEX_MDM=1
+# PIN del acceso técnico (la pantalla pide 4 dígitos): obligatorio en los APK para clientes. El del código es solo
+# para demo; sin este control, un APK de cliente saldría con el PIN que figura en el repo.
+if [ "$DEMO" = false ]; then
+	[[ "${NEX_TECH_PIN:-}" =~ ^[0-9]{4}$ ]] && [ "$NEX_TECH_PIN" != 2468 ] ||
+		{ echo "NEX_TECH_PIN debe ser el PIN técnico de 4 dígitos, distinto del de demo" >&2; exit 1; }
+	export VITE_NEX_TECH_PIN="$NEX_TECH_PIN"
+fi
 if [ -n "${NEX_ADMIN_URL:-}" ]; then
 	case "$NEX_ADMIN_URL" in
 	https://*) export VITE_NEX_ADMIN_URL="$NEX_ADMIN_URL" ;;

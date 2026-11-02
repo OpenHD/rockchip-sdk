@@ -25,9 +25,12 @@ Requiere JDK 17+, Android SDK (`ANDROID_HOME`, por defecto `~/Library/Android/sd
 NEX_MDM_URL=https://<proyecto>.supabase.co \
 NEX_MDM_ANON_KEY=<clave anon pública> \
 NEX_ADMIN_URL=https://<panel>/admin \
+NEX_TECH_PIN=<4 dígitos> \
 apps/nex-tv-android/build.sh
 ```
 
+- `NEX_TECH_PIN`: PIN del acceso técnico, obligatorio salvo con `NEX_DEMO=1` (el del código es solo para demo). Es el
+  mismo en todos los equipos de ese APK y viaja dentro del APK: frena al usuario, no a quien desarme la app.
 - `NEX_OS_SOURCE_DIR`: fuente de NEX-OS (por defecto `apps/nex-os`).
 - `NEX_WEB_TARGET`: navegador objetivo de la web (por defecto `chrome69`, el WebView de Android 9 sin actualizar).
 
