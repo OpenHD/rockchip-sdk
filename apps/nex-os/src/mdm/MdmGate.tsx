@@ -442,6 +442,17 @@ function TechPin({ onOk, onCancel }: { onOk: () => void; onCancel: () => void })
 /** Panel técnico (tras el PIN): diagnóstico del equipo y acciones de servicio. */
 function TechPanel({ state, onClose }: { state: MdmState; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [message, setMessage] = useState('');
+  // Sin Device Owner, Guard devuelve al inicio cualquier app no permitida: esto le da al técnico unos minutos.
+  const openAndroidSettings = useCallback(async () => {
+    try {
+      const res = await fetch(`/agent/setup/settings?token=${encodeURIComponent(state.wifiToken ?? '')}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!data.ok) setMessage('No se pudieron abrir los Ajustes de Android.');
+    } catch {
+      setMessage('No se pudieron abrir los Ajustes de Android.');
+    }
+  }, [state.wifiToken]);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -489,6 +500,12 @@ function TechPanel({ state, onClose }: { state: MdmState; onClose: () => void })
           <button data-index="1" onClick={() => window.location.reload()} className="w-full text-left rounded-xl bg-white/5 border border-white/10 px-5 py-4 text-xl outline-none focus:bg-white/15 focus:border-white/60">
             Reiniciar la interfaz
           </button>
+          {!state.owner && (
+            <button data-index="2" onClick={() => void openAndroidSettings()} className="w-full text-left rounded-xl bg-white/5 border border-white/10 px-5 py-4 text-xl outline-none focus:bg-white/15 focus:border-white/60">
+              Abrir Ajustes de Android (10 min)
+            </button>
+          )}
+          {message && <p role="status" className="text-lg text-amber-100">{message}</p>}
           <p className="text-white/40 text-base leading-relaxed">
             Desvincular el equipo o reiniciar el sistema se hacen desde el panel de tu empresa. El soporte de NEX también
             puede ayudarte de forma remota.

@@ -80,17 +80,22 @@ object Kiosk {
     @Volatile private var lastPackages: List<String> = emptyList()
 
     /**
-     * Apps que pueden correr dentro del modo kiosko. Con el equipo activo: NEX-OS, la Play Store
-     * y las apps del usuario. Bloqueado o sin vincular: solo NEX-OS (Android cierra las demás).
+     * Apps que pueden estar al frente: las del modo kiosko y las que Guard deja pasar. Con el equipo
+     * activo: NEX-OS, la Play Store y las apps del usuario. Bloqueado o sin vincular: solo NEX-OS.
      */
-    fun syncPackages(ctx: Context) {
-        if (!isOwner(ctx)) return
+    fun allowedPackages(ctx: Context): List<String> {
         val pkgs = mutableListOf(ctx.packageName)
         if (Agent.mode == "active") {
             pkgs += AndroidApps.PLAY_SUPPORT.filter { AndroidApps.installed(ctx, it) }
             pkgs += AndroidApps.list(ctx).map { it.pkg }
         }
-        val list = pkgs.distinct()
+        return pkgs.distinct()
+    }
+
+    /** Pasa allowedPackages al modo kiosko (Android cierra las demás apps). */
+    fun syncPackages(ctx: Context) {
+        if (!isOwner(ctx)) return
+        val list = allowedPackages(ctx)
         if (list == lastPackages) return
         runCatching { dpm(ctx).setLockTaskPackages(admin(ctx), list.toTypedArray()) }
             .onSuccess { lastPackages = list; Log.i(TAG, "apps del kiosko: ${list.size}") }

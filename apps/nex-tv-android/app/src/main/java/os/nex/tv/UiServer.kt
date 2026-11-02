@@ -1,7 +1,9 @@
 package os.nex.tv
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
@@ -80,6 +82,17 @@ class UiServer(private val ctx: Context) {
                 return json(403, JSONObject().put("ok", false).put("error", "Token inválido"))
             }
             return json(200, Provision.ownWithRoot(ctx))
+        }
+        // Técnico (después del PIN): abre los Ajustes de Android y Guard lo deja usarlos un rato.
+        if (path == "/agent/setup/settings") {
+            if (!MessageDigest.isEqual(Agent.wifiToken.toByteArray(), url.getQueryParameter("token").orEmpty().toByteArray())) {
+                return json(403, JSONObject().put("ok", false).put("error", "Token inválido"))
+            }
+            Guard.pause()
+            val opened = runCatching {
+                ctx.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            return json(200, JSONObject().put("ok", opened))
         }
         if (path == "/agent/ui-state.json") {
             return WebResourceResponse("application/json", "utf-8", 200, "OK", NO_STORE,
