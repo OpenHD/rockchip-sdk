@@ -79,10 +79,14 @@ class MainActivity : Activity() {
         restoreFocus()
     }
 
-    /** Al volver de una app Android el foco queda en <body> y el control remoto no mueve nada. */
+    /**
+     * Al volver de una app Android el foco queda en <body> o en un contenedor (el #root de React) y el control
+     * remoto no mueve nada: si no está en algo que se pueda manejar con el control, vuelve al primer botón.
+     */
     private fun restoreFocus() {
         if (onUi()) web.evaluateJavascript(
-            "(function(){var a=document.activeElement;if(!a||a===document.body){" +
+            "(function(){var a=document.activeElement;" +
+                "if(!a||!a.matches('button,input,select,textarea,a[href],[tabindex]')){" +
                 "var b=document.querySelector('button[data-index=\"0\"]')||document.querySelector('button');" +
                 "if(b)b.focus();}})()", null)
     }
