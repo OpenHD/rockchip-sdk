@@ -75,7 +75,9 @@ Hi3798MV300H) y `dpm set-device-owner` falla siempre. Ahí protege `Guard`, un s
 inicio si se abre una app no permitida (Ajustes de Android, otro launcher) y, con el equipo bloqueado o sin vincular,
 solo deja NEX. Es más débil que el kiosko: no evita el reset con el botón físico y NEX no se actualiza solo, porque
 Android pide confirmar cada instalación. Para volver a entrar con el ADB apagado: PIN técnico → "Abrir Ajustes de
-Android (10 min)" → Preferencias del dispositivo → Opciones de desarrollador → Depuración USB.
+Android (10 min)" → Preferencias del dispositivo → Información → 7 veces OK en Compilación (la primera vez: las
+Opciones de desarrollador vienen ocultas) → atrás → Opciones de desarrollador → Depuración USB. Probado en el TX6698:
+el ADB vuelve a responder en el puerto 3222 a los segundos.
 
 **NEX como app de sistema (firmwares de prueba).** Si el firmware es `userdebug` y trae `su`, `install-system.sh`
 copia NEX a `/system/priv-app` antes de `install-box.sh`. Así sobrevive a un reset de fábrica (que solo borra los

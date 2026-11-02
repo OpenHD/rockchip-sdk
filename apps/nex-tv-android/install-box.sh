@@ -5,8 +5,9 @@
 # Instala el APK, deja NEX como pantalla de inicio, desactiva el adware de fábrica conocido, fija la zona horaria,
 # activa la protección (Guard) y, si el firmware lo permite, hace a NEX dueño del equipo (Device Owner).
 # Verifica todo y recién entonces apaga el ADB, que en muchos boxes viene abierto en la red.
-# Para volver a entrar después: PIN técnico de NEX → Abrir Ajustes de Android → Opciones de desarrollador →
-# Depuración USB, o resetear el equipo. Ver README, "Instalar en el equipo (taller)".
+# Para volver a entrar después: PIN técnico de NEX → Abrir Ajustes de Android → Preferencias del dispositivo →
+# Información → 7 veces OK en Compilación (la primera vez) → Opciones de desarrollador → Depuración USB, o resetear
+# el equipo. Ver README, "Instalar en el equipo (taller)".
 set -uo pipefail
 
 DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -139,7 +140,8 @@ elif [ "$KEEP_ADB" = 1 ]; then
 	echo "    queda abierto (--keep-adb)"
 else
 	echo "    apagando: la conexión se corta acá. Para volver a entrar: PIN técnico de NEX → Abrir Ajustes de Android →"
-	echo "    Preferencias del dispositivo → Opciones de desarrollador → Depuración USB."
+	echo "    Preferencias del dispositivo → Información → 7 veces OK en Compilación (la primera vez, para que aparezcan"
+	echo "    las Opciones de desarrollador) → atrás → Opciones de desarrollador → Depuración USB."
 	dev settings put global adb_enabled 0
 fi
 echo
