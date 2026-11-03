@@ -1,0 +1,1146 @@
+/* ============================================================
+   NEX OS — Phone shell
+   Active when <html class="nex-phone"> is set.
+   ============================================================ */
+
+html.nex-phone,
+html.nex-phone body {
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+
+html.nex-phone {
+  --nex-status-h: calc(32px + env(safe-area-inset-top, 0px));
+  --nex-nav-h: calc(44px + env(safe-area-inset-bottom, 0px));
+  --nex-dock-h: 84px;
+  --nex-app-top: var(--nex-status-h);
+  --nex-app-bottom: var(--nex-nav-h);
+  --nex-m-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --taskbar-height: var(--nex-nav-h);
+}
+
+html.nex-phone body {
+  min-width: 0;
+  cursor: default;
+}
+
+html.nex-phone .brightness-overlay {
+  z-index: 80;
+}
+
+/* Toasts drop from the status bar, like a phone */
+html.nex-phone .notification-container {
+  top: calc(var(--nex-status-h) + 8px) !important;
+  bottom: auto !important;
+  right: 12px !important;
+  left: 12px !important;
+  align-items: stretch !important;
+}
+
+html.nex-phone .notification-toast {
+  width: 100% !important;
+  max-width: none !important;
+  border-radius: 16px !important;
+}
+
+html.nex-phone .window.maximized {
+  top: var(--nex-app-top) !important;
+  height: calc(100dvh - var(--nex-app-top) - var(--nex-app-bottom)) !important;
+  max-height: calc(100dvh - var(--nex-app-top) - var(--nex-app-bottom)) !important;
+}
+
+/* Hide desktop-only chrome that leaks through */
+html.nex-phone .taskbar-trigger-area,
+html.nex-phone .taskbar-container,
+html.nex-phone .global-miniplayer,
+html.nex-phone .show-desktop {
+  display: none !important;
+}
+
+/* ---------- Shell ---------- */
+.nex-m-shell {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: #fff;
+  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.nex-m-wallpaper {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  transform: scale(1.06);
+  filter: saturate(1.08);
+  transition: transform 0.55s var(--nex-m-ease), filter 0.55s var(--nex-m-ease);
+}
+
+.nex-m-shell.has-app .nex-m-wallpaper {
+  transform: scale(1.12);
+  filter: saturate(1.02) brightness(0.72);
+}
+
+.nex-m-wallpaper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, transparent 18%, transparent 62%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+/* ---------- Status bar ---------- */
+.nex-m-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  height: var(--nex-status-h);
+  padding: env(safe-area-inset-top, 0px) 18px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.nex-m-shell.has-app .nex-m-status {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.42), transparent);
+}
+
+.nex-m-shell.has-app .nex-m-status-brand {
+  opacity: 0;
+}
+
+.nex-m-status-left,
+.nex-m-status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 72px;
+}
+
+.nex-m-status-right {
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.nex-m-status-brand {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  opacity: 0.92;
+  text-transform: uppercase;
+}
+
+.nex-m-batt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nex-m-batt-body {
+  width: 22px;
+  height: 10px;
+  border: 1.4px solid currentColor;
+  border-radius: 3px;
+  position: relative;
+  opacity: 0.95;
+}
+
+.nex-m-batt-body::after {
+  content: '';
+  position: absolute;
+  right: -3.5px;
+  top: 2px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: currentColor;
+}
+
+.nex-m-batt-level {
+  position: absolute;
+  inset: 1.5px;
+  right: auto;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.nex-m-status-icon {
+  display: flex;
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------- Home stage (stays mounted under apps) ---------- */
+.nex-m-home-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  transform-origin: center 42%;
+  transition:
+    transform 0.48s var(--nex-m-ease),
+    filter 0.48s var(--nex-m-ease),
+    opacity 0.4s var(--nex-m-ease);
+  will-change: transform, filter, opacity;
+}
+
+.nex-m-home-stage[data-dimmed='1'] {
+  transform: scale(0.9);
+  filter: blur(14px) saturate(1.1);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.nex-m-app-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.nex-m-app-stage .nex-m-app {
+  pointer-events: auto;
+}
+
+/* ---------- Home ---------- */
+.nex-m-home {
+  position: absolute;
+  inset: 0;
+  padding: calc(var(--nex-status-h) + 8px) 18px calc(var(--nex-nav-h) + var(--nex-dock-h) + 8px);
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+}
+
+.nex-m-clock {
+  padding: 12px 4px 8px;
+}
+
+.nex-m-clock time {
+  display: block;
+  font-size: clamp(3.4rem, 16vw, 5.2rem);
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.nex-m-clock .nex-m-date {
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 500;
+  opacity: 0.88;
+  text-transform: capitalize;
+}
+
+.nex-m-clock .nex-m-hello {
+  margin-top: 2px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.nex-m-search {
+  margin: 14px 0 18px;
+  height: 44px;
+  border-radius: 22px;
+  background: rgba(20, 20, 24, 0.42);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.nex-m-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font-size: 16px;
+  min-width: 0;
+}
+
+.nex-m-search input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.nex-m-grid-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+
+.nex-m-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px 8px;
+}
+
+.nex-m-app-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
+  transition: transform 0.18s var(--nex-m-ease);
+}
+
+.nex-m-app-btn:active {
+  transform: scale(0.92);
+}
+
+.nex-m-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  position: relative;
+  overflow: hidden;
+}
+
+.nex-m-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 42%);
+  pointer-events: none;
+}
+
+.nex-m-icon-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: scale(1.35);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+  color: #fff;
+  z-index: 1;
+}
+
+.nex-m-icon-glyph svg,
+.nex-m-icon-glyph span {
+  width: 26px;
+  height: 26px;
+}
+
+.nex-m-app-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+
+.nex-m-empty {
+  text-align: center;
+  opacity: 0.65;
+  font-size: 14px;
+  padding: 32px 12px;
+}
+
+/* ---------- Dock ---------- */
+.nex-m-dock {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(var(--nex-nav-h) + 6px);
+  z-index: 6;
+  height: 76px;
+  border-radius: 26px;
+  background: rgba(18, 18, 22, 0.48);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  padding: 0 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.nex-m-dock .nex-m-app-btn {
+  flex: 1;
+}
+
+.nex-m-dock .nex-m-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
+}
+
+.nex-m-dock .nex-m-app-label {
+  display: none;
+}
+
+/* ---------- Nav bar ---------- */
+.nex-m-nav {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  height: var(--nex-nav-h);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.28));
+}
+
+.nex-m-nav.is-overlay {
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+.nex-m-nav.is-overlay .nex-m-home-pill {
+  width: 118px;
+  height: 4px;
+}
+
+.nex-m-nav-btn {
+  width: 64px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.92;
+}
+
+.nex-m-nav-btn:active {
+  opacity: 1;
+  transform: scale(0.9);
+}
+
+.nex-m-home-pill {
+  width: 108px;
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
+}
+
+.nex-m-nav-btn.active .nex-m-home-pill {
+  background: var(--win-accent, #60cdff);
+  box-shadow: 0 0 14px var(--win-accent, #60cdff);
+}
+
+/* ---------- Fullscreen app ---------- */
+.nex-m-app {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--win-bg, #111214);
+  overflow: hidden;
+  border-radius: 0;
+  box-shadow: none;
+  padding-top: var(--nex-app-top);
+  padding-bottom: var(--nex-app-bottom);
+  box-sizing: border-box;
+}
+
+.nex-m-app-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+  background: var(--win-bg, #111214);
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+
+.nex-m-app-fill {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.nex-m-app-fill > * {
+  min-height: 100%;
+}
+
+.nex-m-edge-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 22px;
+  z-index: 5;
+}
+
+/* ---------- Shade (control center) ---------- */
+.nex-m-shade-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.nex-m-shade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 51;
+  max-height: min(86dvh, 720px);
+  padding: calc(var(--nex-status-h) + 8px) 14px 18px;
+  border-radius: 0 0 28px 28px;
+  background: rgba(22, 22, 26, 0.78);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nex-m-shade-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.28);
+  margin: 0 auto 14px;
+}
+
+.nex-m-assistant-banner {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  border: none;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #7c3aed, #db2777);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nex-m-assistant-banner span {
+  flex: 1;
+  text-align: left;
+}
+
+.nex-m-qs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.nex-m-qs-btn {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  min-height: 0;
+  min-width: 0;
+}
+
+.nex-m-qs-btn.on {
+  background: var(--win-accent, #0078d4);
+  color: #fff;
+}
+
+.nex-m-slider {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nex-m-slider input[type='range'] {
+  flex: 1;
+  accent-color: var(--win-accent, #60cdff);
+}
+
+.nex-m-notifs {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nex-m-notifs h3 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin: 0 4px 4px;
+}
+
+.nex-m-notif {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nex-m-notif strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.nex-m-notif p {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.nex-m-shade-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.nex-m-shade-actions button {
+  flex: 1;
+  height: 44px;
+  border: none;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.nex-m-shade-actions button.danger {
+  background: rgba(196, 43, 28, 0.85);
+}
+
+/* ---------- App switcher ---------- */
+.nex-m-switcher {
+  position: absolute;
+  inset: 0;
+  z-index: 48;
+  background: rgba(6, 6, 8, 0.62);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--nex-status-h) + 12px) 0 calc(var(--nex-nav-h) + 12px);
+}
+
+.nex-m-switcher h2 {
+  margin: 0 20px 12px;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.nex-m-cards {
+  flex: 1;
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 12px 20px 20px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  align-items: center;
+}
+
+.nex-m-card {
+  flex: 0 0 min(72vw, 280px);
+  height: min(58dvh, 460px);
+  scroll-snap-align: center;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  min-width: min(72vw, 280px);
+}
+
+.nex-m-card-preview {
+  flex: 1;
+  border-radius: 22px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.2)),
+    var(--card-accent, #0078d4);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  overflow: hidden;
+  position: relative;
+}
+
+.nex-m-card-preview::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.35));
+}
+
+.nex-m-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nex-m-card-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.nex-m-switcher-empty {
+  margin: auto;
+  text-align: center;
+  opacity: 0.7;
+}
+
+/* ---------- Mini player ---------- */
+.nex-m-mini {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(var(--nex-nav-h) + 86px);
+  z-index: 7;
+  height: 56px;
+  border-radius: 16px;
+  background: rgba(18, 18, 22, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 0 8px;
+}
+
+.nex-m-mini img {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.nex-m-mini-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.nex-m-mini-info strong,
+.nex-m-mini-info span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nex-m-mini-info strong {
+  font-size: 13px;
+}
+
+.nex-m-mini-info span {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.nex-m-mini button {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+}
+
+/* ---------- Lock screen ---------- */
+.nex-m-lock {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: #fff;
+  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  user-select: none;
+}
+
+.nex-m-lock-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.nex-m-lock-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.55));
+}
+
+.nex-m-lock-clock {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding-top: calc(var(--nex-status-h, 48px) + 36px);
+  transition: transform 0.4s ease, opacity 0.3s ease;
+}
+
+.nex-m-lock-clock.up {
+  transform: translateY(-24px);
+  opacity: 0.35;
+}
+
+.nex-m-lock-clock time {
+  display: block;
+  font-size: clamp(4.2rem, 18vw, 5.6rem);
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+}
+
+.nex-m-lock-clock .nex-m-date {
+  margin-top: 8px;
+  font-size: 17px;
+  font-weight: 500;
+  text-transform: capitalize;
+  opacity: 0.92;
+}
+
+.nex-m-lock-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  z-index: 2;
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.nex-m-lock-hint .pill {
+  width: 120px;
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.85);
+  margin: 0 auto 12px;
+}
+
+.nex-m-lock-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 24px calc(28px + env(safe-area-inset-bottom, 0px));
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+}
+
+.nex-m-lock-avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  margin-bottom: 10px;
+}
+
+.nex-m-lock-name {
+  font-size: 22px;
+  font-weight: 650;
+  margin-bottom: 18px;
+}
+
+.nex-m-pin-dots {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.nex-m-pin-dots i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+}
+
+.nex-m-pin-dots i.filled {
+  background: #fff;
+}
+
+.nex-m-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 72px);
+  gap: 12px 18px;
+  margin-bottom: 16px;
+}
+
+.nex-m-key {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 26px;
+  font-weight: 500;
+  min-width: 72px;
+  min-height: 72px;
+}
+
+.nex-m-key:active {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.nex-m-lock-users {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 4px 0 8px;
+}
+
+.nex-m-lock-users button {
+  flex-shrink: 0;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 99px;
+  padding: 6px 12px 6px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  min-height: 36px;
+}
+
+.nex-m-lock-users button.on {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.nex-m-lock-users img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.nex-m-lock-error {
+  color: #ffb4b4;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.nex-m-enter {
+  height: 44px;
+  padding: 0 28px;
+  border: none;
+  border-radius: 99px;
+  background: var(--win-accent, #0078d4);
+  color: #fff;
+  font-weight: 650;
+  margin-bottom: 16px;
+}
+
+/* ---------- Landscape ---------- */
+@media (orientation: landscape) and (max-height: 500px) {
+  html.nex-phone {
+    --nex-status-h: calc(26px + env(safe-area-inset-top, 0px));
+    --nex-nav-h: calc(40px + env(safe-area-inset-bottom, 0px));
+    --nex-dock-h: 64px;
+  }
+
+  .nex-m-clock {
+    display: none;
+  }
+
+  .nex-m-home {
+    padding-top: calc(var(--nex-status-h) + 4px);
+  }
+
+  .nex-m-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px 6px;
+  }
+
+  .nex-m-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .nex-m-dock {
+    height: 58px;
+    border-radius: 18px;
+  }
+
+  .nex-m-dock .nex-m-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .nex-m-lock-clock time {
+    font-size: 3.2rem;
+  }
+
+  .nex-m-key {
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    min-height: 52px;
+    font-size: 20px;
+  }
+
+  .nex-m-keypad {
+    grid-template-columns: repeat(3, 52px);
+    gap: 8px 14px;
+  }
+}
+
+@media (max-width: 360px) {
+  .nex-m-icon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .nex-m-grid {
+    gap: 14px 4px;
+  }
+}
+
+/* Beat leftover generic mobile rules for the phone chrome only */
+html.nex-phone .nex-m-switcher h2 {
+  font-size: 22px;
+}
+
+html.nex-phone .nex-m-clock time,
+html.nex-phone .nex-m-lock-clock time {
+  font-size: clamp(3.4rem, 16vw, 5.2rem);
+}
+
+html.nex-phone .nex-m-lock-clock time {
+  font-size: clamp(4.2rem, 18vw, 5.6rem);
+}
+
+html.nex-phone .nex-m-key {
+  font-size: 26px;
+}
+
+html.nex-phone .nex-m-nav-btn,
+html.nex-phone .nex-m-app-btn,
+html.nex-phone .nex-m-status,
+html.nex-phone .nex-m-qs-btn,
+html.nex-phone .nex-m-card,
+html.nex-phone .nex-m-card-close,
+html.nex-phone .nex-m-mini button,
+html.nex-phone .nex-m-shade-actions button,
+html.nex-phone .nex-m-key {
+  min-height: 0 !important;
+  min-width: 0 !important;
+}
+
+html.nex-phone .nex-m-nav-btn,
+html.nex-phone .nex-m-app-btn,
+html.nex-phone .nex-m-qs-btn,
+html.nex-phone .nex-m-card-close,
+html.nex-phone .nex-m-mini button {
+  font-size: inherit !important;
+}
+
+html.nex-phone .nex-m-search input,
+html.nex-phone .nex-m-app input,
+html.nex-phone .nex-m-app textarea {
+  font-size: 16px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nex-m-home-stage,
+  .nex-m-wallpaper {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .nex-m-home-stage[data-dimmed='1'] {
+    filter: none;
+    opacity: 0;
+  }
+}
