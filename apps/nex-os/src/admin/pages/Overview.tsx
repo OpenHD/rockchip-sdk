@@ -4,6 +4,7 @@ import {
   CircleCheck,
   Clock,
   CreditCard,
+  HeartPulse,
   Hourglass,
   Lock,
   LockOpen,
@@ -17,6 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { deviceStatus, enforcement, EVENT_LABELS, isOnline, type Company, type DeviceEvent } from '../api';
+import { HealthSummary } from '../DeviceHealth';
 import { healthIssues } from '../deviceMeta';
 import { relativeTime } from '../format';
 import { Button, Card, Chip, EmptyState, ErrorText, PageHeader, Skeleton } from '../ui';
@@ -134,6 +136,13 @@ export default function OverviewPage({
       for (const issue of healthIssues(d)) {
         items.push({ id: `${d.id}-${issue}`, deviceId: d.id, title: issue, detail: name, tone: 'danger', icon: ShieldAlert });
       }
+      const score = data.health.get(d.id);
+      if (score?.band === 'problemas') {
+        items.push({
+          id: `${d.id}-health`, deviceId: d.id, title: `Salud baja (${score.score} de 100)`,
+          detail: `${name} · ${score.reasons[0]?.text ?? 'ver detalle'}`, tone: 'danger', icon: HeartPulse,
+        });
+      }
       if (enforcement(d, company) === 'pendiente') {
         items.push({ id: `${d.id}-pending`, deviceId: d.id, title: 'Cambio sin aplicar', detail: `${name} · todavía no confirmó`, tone: 'warning', icon: Hourglass });
       }
@@ -145,7 +154,7 @@ export default function OverviewPage({
       }
     }
     return items.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'danger' ? -1 : 1));
-  }, [devices, company]);
+  }, [devices, company, data.health]);
 
   const events = onlyAlerts ? data.events.filter((e) => e.severity !== 'info') : data.events;
 
@@ -175,6 +184,8 @@ export default function OverviewPage({
           <Kpi label="Alertas de seguridad" value={stats.security} icon={ShieldAlert} tone={stats.security ? 'rose' : 'zinc'} onClick={() => goDevices('alertas')} />
         </div>
       )}
+
+      {data.devices && devices.length > 0 && <HealthSummary scores={data.health.values()} onOpenLow={() => goDevices('salud-baja')} />}
 
       <div className="grid gap-6 xl:grid-cols-5">
         <Card title="Requiere atención" description="Ordenado por prioridad" className="xl:col-span-2" padded={false}>

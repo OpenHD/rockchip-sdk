@@ -65,6 +65,7 @@
 [data-theme="light"] [class~="ring-white/[0.06]"] { --tw-ring-color: rgb(17 19 28 / 0.086); }
 [data-theme="light"] [class~="shadow-black/40"] { --tw-shadow-color: rgb(17 19 28 / 0.08); }
 [data-theme="light"] [class~="shadow-black/50"] { --tw-shadow-color: rgb(17 19 28 / 0.08); }
+[data-theme="light"] [class~="sm:border-white/[0.06]"] { border-color: rgb(17 19 28 / 0.086); }
 [data-theme="light"] [class~="text-amber-100"] { color: #78350f; }
 [data-theme="light"] [class~="text-amber-200"] { color: #92400e; }
 [data-theme="light"] [class~="text-amber-300"] { color: #b45309; }
@@ -79,6 +80,7 @@
 [data-theme="light"] [class~="text-rose-400"] { color: #e11d48; }
 [data-theme="light"] [class~="text-sky-300"] { color: #0369a1; }
 [data-theme="light"] [class~="text-white"]:not([class~="bg-indigo-500"]):not([class~="bg-rose-500/90"]):not([class~="bg-emerald-500/90"]):not([class~="bg-gradient-to-br"]:not([class~="from-indigo-500/40"])) { color: rgb(17 19 28 / 1); }
+[data-theme="light"] [class~="text-white/10"]:not([class~="bg-indigo-500"]):not([class~="bg-rose-500/90"]):not([class~="bg-emerald-500/90"]):not([class~="bg-gradient-to-br"]:not([class~="from-indigo-500/40"])) { color: rgb(17 19 28 / 0.1); }
 [data-theme="light"] [class~="text-white/70"]:not([class~="bg-indigo-500"]):not([class~="bg-rose-500/90"]):not([class~="bg-emerald-500/90"]):not([class~="bg-gradient-to-br"]:not([class~="from-indigo-500/40"])) { color: rgb(17 19 28 / 0.7); }
 [data-theme="light"] [class~="text-white/75"]:not([class~="bg-indigo-500"]):not([class~="bg-rose-500/90"]):not([class~="bg-emerald-500/90"]):not([class~="bg-gradient-to-br"]:not([class~="from-indigo-500/40"])) { color: rgb(17 19 28 / 0.75); }
 [data-theme="light"] [class~="text-white/80"]:not([class~="bg-indigo-500"]):not([class~="bg-rose-500/90"]):not([class~="bg-emerald-500/90"]):not([class~="bg-gradient-to-br"]:not([class~="from-indigo-500/40"])) { color: rgb(17 19 28 / 0.8); }

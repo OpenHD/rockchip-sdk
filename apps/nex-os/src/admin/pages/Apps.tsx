@@ -11,6 +11,7 @@ function hostOf(url: string | null): string {
   }
 }
 import { useToast } from '../toast';
+import AndroidAppsSection from './AndroidApps';
 import { Badge, Card, EmptyState, ErrorText, PageHeader, Skeleton, Switch } from '../ui';
 
 export default function AppsPage({ company }: { company: Company }) {
@@ -109,6 +110,7 @@ export default function AppsPage({ company }: { company: Company }) {
           })}
         </div>
       )}
+      <AndroidAppsSection company={company} />
     </>
   );
 }

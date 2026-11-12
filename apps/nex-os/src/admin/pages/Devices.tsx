@@ -40,8 +40,10 @@ import {
   type StateLogEntry,
   type UnlockCode,
 } from '../api';
+import { HealthPill, HealthSection, NetDiagSection } from '../DeviceHealth';
 import { FILTERS, healthIssues, paymentText, SERVICE_STAGES, STATE_SOURCE_LABELS, STATUS_META, type Filter } from '../deviceMeta';
-import { addMonths, copyText, formatDate, formatUptime, LOCK_REASONS, relativeTime, RESTRICT_REASONS, todayIso } from '../format';
+import { addMonths, copyText, formatDate, LOCK_REASONS, relativeTime, RESTRICT_REASONS, todayIso } from '../format';
+import type { HealthInputs, HealthScore } from '../health';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
 import {
@@ -558,6 +560,9 @@ function DeviceDrawer({
   device,
   company,
   events,
+  score,
+  inputs,
+  now,
   onClose,
   onAction,
   onChanged,
@@ -565,6 +570,10 @@ function DeviceDrawer({
   device: Device;
   company: Company;
   events: DeviceEvent[];
+  score: HealthScore | undefined;
+  inputs: HealthInputs | undefined;
+  /** Momento de la última carga de datos: contra eso se calcula si el diagnóstico sigue pendiente. */
+  now: number;
   onClose: () => void;
   onAction: (d: Dialog) => void;
   onChanged: () => void;
@@ -688,8 +697,12 @@ function DeviceDrawer({
           </div>
         </section>
 
+        <HealthSection device={device} score={score} inputs={inputs} />
+
+        <NetDiagSection device={device} now={now} onRefresh={onChanged} />
+
         <section>
-          <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Seguridad y salud</h3>
+          <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Seguridad</h3>
           <div className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] px-4">
             <HealthRow ok={h.hardened} label="Modo TV cerrado" />
             {h.platform === 'android' ? (
@@ -705,8 +718,6 @@ function DeviceDrawer({
                 <HealthRow ok={h.firewall} label="Firewall" />
               </>
             )}
-            <HealthRow ok={undefined} label="Encendido hace" detail={formatUptime(h.uptime)} />
-            <HealthRow ok={undefined} label="Espacio libre" detail={h.free_mb ? `${(h.free_mb / 1024).toFixed(1)} GB` : '—'} />
           </div>
         </section>
 
@@ -793,15 +804,17 @@ export default function DevicesPage({
   const [dialog, setDialog] = useState<Dialog | null>(initialClaim ? { kind: 'claim', code: initialClaim } : null);
   const devices = useMemo(() => data.devices ?? [], [data.devices]);
 
+  const filterCtx = useMemo(() => ({ health: data.health }), [data.health]);
+
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((f) => [f.id, devices.filter((d) => f.test(d, company)).length])),
-    [devices, company],
+    () => Object.fromEntries(FILTERS.map((f) => [f.id, devices.filter((d) => f.test(d, company, filterCtx)).length])),
+    [devices, company, filterCtx],
   );
   const shown = devices.filter((d) => {
     const f = FILTERS.find((x) => x.id === filter)!;
     const q = query.trim().toLowerCase();
     return (
-      f.test(d, company) &&
+      f.test(d, company, filterCtx) &&
       (!q || (d.name ?? '').toLowerCase().includes(q) || d.id.startsWith(q) || (d.external_ref ?? '').toLowerCase().includes(q))
     );
   });
@@ -866,6 +879,7 @@ export default function DevicesPage({
                 <tr className="text-[11px] uppercase tracking-wider text-zinc-500">
                   <th className="px-5 pb-3 font-medium">Equipo</th>
                   <th className="pb-3 font-medium">Estado</th>
+                  <th className="pb-3 font-medium">Salud</th>
                   <th className="pb-3 font-medium">Conexión</th>
                   <th className="pb-3 font-medium">Pago</th>
                   <th className="pb-3" />
@@ -898,6 +912,7 @@ export default function DevicesPage({
                           {issues.length > 0 && <span className="flex items-center gap-1 text-[11px] text-rose-300"><ShieldAlert className="h-3 w-3" aria-hidden /> {issues[0]}</span>}
                         </div>
                       </td>
+                      <td className="py-3.5"><HealthPill score={data.health.get(d.id)} /></td>
                       <td className="py-3.5">
                         <div className="flex items-center gap-2 text-sm text-zinc-300">
                           <StatusDot online={online} /> {online ? 'En línea' : relativeTime(d.last_seen_at)}
@@ -944,7 +959,10 @@ export default function DevicesPage({
                         <div className="truncate text-sm font-medium text-zinc-100">{d.name ?? 'Sin nombre'}</div>
                         <div className={`text-xs ${pay.tone}`}>{pay.text}</div>
                       </div>
-                      <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
+                        <HealthPill score={data.health.get(d.id)} />
+                      </span>
                     </button>
                   </li>
                 );
@@ -960,7 +978,17 @@ export default function DevicesPage({
       </p>
 
       {selected && (
-        <DeviceDrawer device={selected} company={company} events={data.events} onClose={() => onSelect(null)} onAction={setDialog} onChanged={data.reload} />
+        <DeviceDrawer
+          device={selected}
+          company={company}
+          events={data.events}
+          score={data.health.get(selected.id)}
+          inputs={data.healthInputs.get(selected.id)}
+          now={data.loadedAt}
+          onClose={() => onSelect(null)}
+          onAction={setDialog}
+          onChanged={data.reload}
+        />
       )}
       {dialog?.kind === 'lock' && <LockModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
       {dialog?.kind === 'restrict' && <RestrictModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}

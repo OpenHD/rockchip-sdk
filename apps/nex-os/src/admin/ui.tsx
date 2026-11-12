@@ -182,6 +182,8 @@ export function Switch({
 export function Chip({ active, onClick, children, count }: { active: boolean; onClick: () => void; children: ReactNode; count?: number }) {
   return (
     <button
+      type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
         active ? 'border-indigo-400/60 bg-indigo-500/15 text-indigo-200' : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200'

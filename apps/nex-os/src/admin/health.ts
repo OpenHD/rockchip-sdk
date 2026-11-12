@@ -189,3 +189,56 @@ export function netVerdict(n: NetDiag): { verdict: NetVerdict; reasons: string[]
 
   return { verdict: 'ok', reasons: [] };
 }
+
+// ---------------------------------------------------------------------------
+// Ayudas para las pantallas (resumen por banda, tramos y estado del pedido)
+// ---------------------------------------------------------------------------
+
+/** De peor a mejor: así se muestran en el resumen y se ordenan en las listas. */
+export const BAND_ORDER: HealthBand[] = ['problemas', 'atencion', 'bien', 'sin-datos'];
+
+export function bandCounts(scores: Iterable<HealthScore>): Record<HealthBand, number> {
+  const counts: Record<HealthBand, number> = { bien: 0, atencion: 0, problemas: 0, 'sin-datos': 0 };
+  for (const s of scores) counts[s.band] += 1;
+  return counts;
+}
+
+/** Salud baja = hay algo para mirar (amarillo o rojo). */
+export function isLowHealth(s: HealthScore | undefined): boolean {
+  return s?.band === 'atencion' || s?.band === 'problemas';
+}
+
+export type SegmentState = 'ok' | 'falla' | 'sin-datos';
+
+/**
+ * Estado de cada tramo para el dibujo TV box → router/ONU → internet. Sale del mismo veredicto, así el dibujo
+ * nunca contradice el texto. Si falla el tramo local, el de internet solo se marca bien cuando la medición lo
+ * confirma: con la red de la casa rota no se puede culpar (ni absolver) al acceso.
+ */
+export function netSegments(n: NetDiag): { local: SegmentState; internet: SegmentState } {
+  const { verdict } = netVerdict(n);
+  if (verdict === 'ok') return { local: 'ok', internet: 'ok' };
+  if (verdict === 'internet') return { local: 'ok', internet: 'falla' };
+  if (verdict === 'sin-conexion') return { local: 'falla', internet: 'sin-datos' };
+  const inetMs = num(n.inet_ms);
+  const inetLoss = num(n.inet_loss);
+  return { local: 'falla', internet: inetMs !== null && inetMs < 150 && (inetLoss ?? 0) < 5 ? 'ok' : 'sin-datos' };
+}
+
+/** El sync le pasa el pedido al equipo solo durante una hora (mdm_device_sync, v12). */
+export const DIAG_WINDOW_MS = 3_600_000;
+/** El equipo sincroniza cada minuto y la medición tarda menos de un minuto: pasado esto, algo lo demora. */
+export const DIAG_SLOW_MS = 4 * 60_000;
+
+/**
+ * nunca: no hay pedido ni resultado. pendiente: hay un pedido que el equipo todavía puede tomar.
+ * sin-respuesta: el pedido venció sin resultado. listo: el último pedido tiene resultado.
+ */
+export type DiagState = 'nunca' | 'pendiente' | 'sin-respuesta' | 'listo';
+
+export function diagState(d: Pick<Device, 'diag_requested_at' | 'net_diag' | 'net_diag_at'>, now = Date.now()): DiagState {
+  const req = d.diag_requested_at ? new Date(d.diag_requested_at).getTime() : null;
+  const res = d.net_diag_at ? new Date(d.net_diag_at).getTime() : null;
+  if (req !== null && (res === null || res < req)) return now - req < DIAG_WINDOW_MS ? 'pendiente' : 'sin-respuesta';
+  return d.net_diag ? 'listo' : 'nunca';
+}

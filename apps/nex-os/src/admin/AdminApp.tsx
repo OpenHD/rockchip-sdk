@@ -9,6 +9,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu as MenuIcon,
   MonitorX,
   Package,
@@ -35,6 +36,7 @@ import AppsPage from './pages/Apps';
 import BrandPage from './pages/Brand';
 import DevicesPage from './pages/Devices';
 import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/Nex';
+import NoticesPage from './pages/Notices';
 import OverviewPage from './pages/Overview';
 import { ApiKeysPage, AuditPage, MembersPage } from './pages/Team';
 import { takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
@@ -310,6 +312,7 @@ const COMPANY_NAV: { id: CompanySection; label: string; icon: LucideIcon }[] = [
   { id: 'apps', label: 'Apps', icon: AppWindow },
   { id: 'marca', label: 'Marca y cobro', icon: Palette },
   { id: 'avisos', label: 'Avisos', icon: Bell },
+  { id: 'comunicados', label: 'Comunicados', icon: Megaphone },
   { id: 'miembros', label: 'Miembros', icon: Users },
   { id: 'api', label: 'API', icon: Plug },
   { id: 'auditoria', label: 'Auditoría', icon: ScrollText },
@@ -402,6 +405,8 @@ function CompanyWorkspace({
       return <BrandPage company={company} onChanged={onCompanyChanged} />;
     case 'avisos':
       return <AlertsPage company={company} onChanged={onCompanyChanged} />;
+    case 'comunicados':
+      return <NoticesPage company={company} deviceCount={data.devices?.length ?? null} />;
     case 'miembros':
       return <MembersPage company={company} />;
     case 'api':
