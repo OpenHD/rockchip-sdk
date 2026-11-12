@@ -273,3 +273,14 @@ input[type='date']::-webkit-calendar-picker-indicator {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Impresión (Guía técnica → "Imprimir / Guardar PDF"): solo el contenido, sin el armazón del panel.
+   La página pasa al tema claro antes de imprimir (ver pages/Guide.tsx). */
+@media print {
+  [data-noprint] { display: none !important; }
+  :root body { background: #fff; }
+  main { max-width: none !important; padding: 0 !important; }
+  a { text-decoration: none; }
+  .print-keep { break-inside: avoid; }
+  @page { margin: 14mm 12mm; }
+}

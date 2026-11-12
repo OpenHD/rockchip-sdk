@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import {
   AppWindow,
   Bell,
+  BookOpen,
   Building2,
   Check,
   ChevronsUpDown,
@@ -52,6 +53,7 @@ import DevicesPage from './pages/Devices';
 import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/Nex';
 import NoticesPage from './pages/Notices';
 import OverviewPage from './pages/Overview';
+import GuidePage from './pages/Guide';
 import { ApiKeysPage, AuditPage, MembersPage } from './pages/Team';
 import ZonesPage from './pages/Zones';
 import { formatRoute, takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
@@ -383,6 +385,10 @@ const COMPANY_NAV: { group: string; items: NavItem<CompanySection>[] }[] = [
       { id: 'auditoria', label: 'Auditoría', icon: ScrollText },
     ],
   },
+  {
+    group: 'Ayuda',
+    items: [{ id: 'guia', label: 'Guía técnica', icon: BookOpen }],
+  },
 ];
 
 const NEX_NAV: NavItem<NexSection>[] = [
@@ -579,6 +585,8 @@ function CompanyWorkspace({
       return <ApiKeysPage company={company} />;
     case 'auditoria':
       return <AuditPage company={company} />;
+    case 'guia':
+      return <GuidePage company={company} />;
     default:
       return (
         <OverviewPage
@@ -735,16 +743,17 @@ export function Shell({ session }: { session: Session }) {
     <div className="flex min-h-[100dvh]">
       <button
         type="button"
+        data-noprint
         className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
         onClick={() => document.getElementById('contenido')?.focus()}
       >
         Ir al contenido
       </button>
-      <aside className="sticky top-0 hidden h-[100dvh] w-[264px] shrink-0 border-r border-line bg-surface lg:block">{sidebar}</aside>
+      <aside data-noprint className="sticky top-0 hidden h-[100dvh] w-[264px] shrink-0 border-r border-line bg-surface lg:block">{sidebar}</aside>
       {mobileNav && <MobileNav onClose={() => setMobileNav(false)}>{sidebar}</MobileNav>}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 lg:hidden">
+        <header data-noprint className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 lg:hidden">
           <IconButton icon={MenuIcon} label="Abrir menú" aria-haspopup="dialog" onClick={() => setMobileNav(true)} />
           {current ? (
             <button type="button" onClick={() => setMobileNav(true)} aria-label={`Empresa: ${current.name}. Abrir menú`} className="flex min-w-0 items-center gap-2.5 rounded-lg py-1 pr-2 text-left">
@@ -790,7 +799,7 @@ export function Shell({ session }: { session: Session }) {
         </main>
 
         {current && (
-          <nav aria-label="Accesos rápidos" className="pb-safe fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface lg:hidden">
+          <nav data-noprint aria-label="Accesos rápidos" className="pb-safe fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface lg:hidden">
             <div className="mx-auto grid h-14 max-w-md grid-cols-4">
               {MOBILE_TABS.map((id) => {
                 const item = ALL_COMPANY_ITEMS.find((n) => n.id === id)!;

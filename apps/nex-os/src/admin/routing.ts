@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 /** Rutas del panel en el hash (#/c/<empresa>/<sección>?f=<filtro>&z=<zona>&d=<equipo>): el botón "atrás" funciona. */
-export type CompanySection = 'resumen' | 'equipos' | 'zonas' | 'apps' | 'marca' | 'avisos' | 'comunicados' | 'miembros' | 'api' | 'auditoria';
+export type CompanySection = 'resumen' | 'equipos' | 'zonas' | 'apps' | 'marca' | 'avisos' | 'comunicados' | 'miembros' | 'api' | 'auditoria' | 'guia';
 export type NexSection = 'nueva-empresa' | 'catalogo' | 'firmware' | 'pirateria';
 
 export type Route =
@@ -9,7 +9,7 @@ export type Route =
   | { scope: 'nex'; section: NexSection }
   | { scope: 'home' };
 
-const COMPANY_SECTIONS: CompanySection[] = ['resumen', 'equipos', 'zonas', 'apps', 'marca', 'avisos', 'comunicados', 'miembros', 'api', 'auditoria'];
+const COMPANY_SECTIONS: CompanySection[] = ['resumen', 'equipos', 'zonas', 'apps', 'marca', 'avisos', 'comunicados', 'miembros', 'api', 'auditoria', 'guia'];
 const NEX_SECTIONS: NexSection[] = ['nueva-empresa', 'catalogo', 'firmware', 'pirateria'];
 
 export function parseHash(hash: string): Route {

@@ -836,3 +836,37 @@ NEX TV (agente 3, `FactoryRisk.kt`) informa en health `up_mbps` (subida de 5 min
 categoría "Manipulación": llegan por Telegram/mail si la empresa tiene esas alertas. En el panel restan salud
 (35-50 y 25 puntos) y aparecen en el filtro "Con alertas". NEX solo informa: cerrar esos accesos requiere reparar el
 firmware (CureBox). Despliegue: correr `supabase/schema-mdm-v13.sql` (idempotente, después de v12).
+
+## v14: cada uno define su contraseña
+
+Hasta v13, NEX creaba las cuentas del panel y pasaba la contraseña a mano. Ahora:
+
+- **Invitar** (Miembros, solo dueños, con 2FA reciente): la Edge Function `mdm-invite` valida con
+  `mdm_invite_precheck` (rol, 2FA, email, 30 invitaciones por día), crea la invitación de Supabase y suma al miembro con
+  `mdm_set_member` usando el JWT del dueño (queda en la auditoría).
+- **Olvidé mi contraseña** en el login y **Cambiar contraseña** en el menú de sesión.
+- Los links del email (invitación y recuperación) abren `/admin`; el panel los canjea recién cuando la persona aprieta
+  "Continuar". Acepta `?token_hash=…&type=` (plantillas editadas) y el formato por defecto con la sesión en el `#`.
+
+Configuración: correr `schema-mdm-v14.sql`; publicar `supabase/functions/mdm-invite` (con verificación de JWT) con el
+secreto `MDM_PANEL_URL`; agregar la URL del panel en Auth → URL Configuration → Redirect URLs; configurar un SMTP propio
+(Auth → SMTP), porque el de Supabase manda pocos emails por hora.
+
+## v15: zonas y caída masiva por zona
+
+- **Zonas** (localidad, nodo u OLT): `mdm_zones`, `mdm_devices.zone_id`. Se cargan en el panel (Operación → Zonas,
+  asignación masiva en Equipos) o desde la API del ISP: `POST /devices/<id>/zone {zone: "Nombre" | null}`, que crea la
+  zona si no existe.
+- **Comunicados por zona**: `mdm_notices.zone_ids` (null = todos). El sync solo los entrega a los equipos de esas zonas.
+- **Caída masiva**: `mdm_check_offline` (cada minuto) también llama a `_mdm_detect_zone_outages`. Una zona con 3 o más
+  equipos vistos en las últimas 2 h entra en caída cuando la mitad o más (mínimo 3) dejaron de sincronizar a la vez
+  (hace 3 a 15 min). Sale con 20 % o menos sin conexión, o si la zona queda sin equipos. Eventos `zone_outage` y
+  `zone_restored` (categoría "Sin conexión"), con la zona y "X de Y" en el aviso de Telegram o mail.
+
+Despliegue: `schema-mdm-v15.sql` después de v14, y antes de publicar el panel.
+
+## Root (su) en los TX6698
+
+Los TX6698 traen `su` (firmware userdebug) y el kit de instalación lo usa para copiar NEX al sistema. Desde NEX TV 2.1.1,
+`su` se informa en `health.factory.su` pero no dispara `factory_backdoor` ni resta salud: solo los puertos de fábrica
+(40000, 5555) y las apps de control remoto son puertas traseras.
