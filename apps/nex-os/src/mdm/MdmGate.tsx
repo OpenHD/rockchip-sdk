@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNod
 import WifiScreen from './WifiScreen';
 import qrcode from 'qrcode-generator';
 import AppRegistry from '../components/AppRegistry';
-import { useAgentState, type MdmApp, type MdmState } from './agentState';
+import { useAgentState, type MdmApp, type MdmNotice, type MdmState } from './agentState';
+import { orderDock, tileGradient } from './dock';
+import { NoticeBanner, NoticeModal } from './NoticeViews';
+import { useNotices } from './notices';
 
 /**
  * Interfaz del TV box gestionado. Muestra solo lo que nex-agent publica:
@@ -22,6 +25,9 @@ const TV_SAFE_INTERNAL = new Set([
 ]);
 
 const BACK_KEYS = new Set(['Escape', 'Backspace', 'BrowserBack', 'GoBack']);
+
+/** Con un aviso a pantalla completa encima, "Atrás" es del aviso y no de la pantalla que quedó detrás. */
+const noticeOpen = () => document.querySelector('[data-nex-modal]') !== null;
 
 /** Íconos de línea, estilo NEX (minimalistas, un solo trazo). Se eligen por id de app, paquete Android o nombre. */
 const ICON_PATHS: Record<string, string> = {
@@ -77,6 +83,28 @@ function AppIcon({ app, size = 'md' }: { app: { id: string; name: string; icon?:
         <path key={i} d={(i === 0 ? '' : 'M') + seg} />
       ))}
     </svg>
+  );
+}
+
+/** Flecha de descarga: marca las apps que todavía hay que instalar. */
+function DownloadIcon({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M12 4v11 M7 11l5 5 5-5 M5 20h14" />
+    </svg>
+  );
+}
+
+/** Cara de una app sin instalar: no hay ícono real, así que lleva su inicial sobre un color propio. */
+function InstallFace({ app, size }: { app: MdmApp; size: 'sm' | 'lg' }) {
+  return (
+    <span
+      className={`absolute top-0 left-0 h-full w-full rounded-full flex items-center justify-center font-semibold text-white ${size === 'lg' ? 'text-8xl' : 'text-4xl'}`}
+      style={{ background: tileGradient(app.id) }}
+      aria-hidden
+    >
+      {app.name.trim().charAt(0).toUpperCase()}
+    </span>
   );
 }
 
@@ -373,7 +401,7 @@ function TechPin({ onOk, onCancel }: { onOk: () => void; onCancel: () => void })
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key)) {
+      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
         e.preventDefault();
         onCancel();
       }
@@ -456,7 +484,7 @@ function TechPanel({ state, onClose }: { state: MdmState; onClose: () => void })
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key)) {
+      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
         e.preventDefault();
         onClose();
       }
@@ -594,17 +622,26 @@ function SettingsScreen({ state, appearance, setAppearance, onClose }: {
   );
 }
 
-const SETTINGS_ITEM: MdmApp = { id: 'ajustes', name: 'Ajustes', kind: 'internal', launch_url: null, icon: null };
+const SETTINGS_ITEM: MdmApp = { id: 'ajustes', name: 'Ajustes', kind: 'internal', launch_url: null, icon: null, install: false };
 
-function TvHome({ state }: { state: MdmState }) {
+function TvHome({ state, notice, noticeCount, onReadNotice }: {
+  state: MdmState;
+  /** Aviso de la empresa a mostrar en el inicio (nunca una emergencia: esas van a pantalla completa). */
+  notice: MdmNotice | null;
+  noticeCount: number;
+  onReadNotice: (id: string) => void;
+}) {
   const clock = useClock();
   const [selectedApp, setOpenApp] = useState<MdmApp | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [appearance, setAppearance] = useAppearance();
   const [sel, setSel] = useState(0);
+  const homeRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
+  const bannerRef = useRef<HTMLButtonElement>(null);
+  // Las apps por instalar van después de las que ya se pueden abrir.
   const apps = useMemo(
-    () => state.apps.filter((a) => a.kind === 'web' || TV_SAFE_INTERNAL.has(a.id)),
+    () => orderDock(state.apps.filter((a) => a.kind === 'web' || TV_SAFE_INTERNAL.has(a.id))),
     [state.apps],
   );
   // El Ajustes va al final del dock, como una app más.
@@ -617,13 +654,19 @@ function TvHome({ state }: { state: MdmState }) {
   const openApp = selectedApp && apps.some((a) => a.id === selectedApp.id) ? selectedApp : null;
 
   useEffect(() => {
-    if (!openApp && !showSettings) dockRef.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
+    if (openApp || showSettings) return;
+    // Un aviso a pantalla completa tiene el control remoto: no se le saca el foco.
+    if (document.querySelector('[data-nex-modal]')) return;
+    // Si el foco ya está en el inicio (dock o aviso), un cambio de estado del equipo no lo mueve.
+    const active = document.activeElement;
+    if (active instanceof HTMLButtonElement && homeRef.current?.contains(active)) return;
+    dockRef.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
   }, [openApp, showSettings, apps]);
 
   useEffect(() => {
     if (!openApp) return;
     const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key)) {
+      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
         e.preventDefault();
         setOpenApp(null);
       }
@@ -635,7 +678,7 @@ function TvHome({ state }: { state: MdmState }) {
   useEffect(() => {
     if (!showSettings) return;
     const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key)) {
+      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
         e.preventDefault();
         setShowSettings(false);
       }
@@ -656,7 +699,22 @@ function TvHome({ state }: { state: MdmState }) {
     }
   }, []);
 
+  const focusDock = (index: number) =>
+    dockRef.current?.querySelector<HTMLButtonElement>(`button[data-index="${Math.min(index, dock.length - 1)}"]`)?.focus();
+
+  // El aviso queda arriba del dock: se entra con ▲ y se vuelve con ▼.
+  const onBannerKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!e.key.startsWith('Arrow')) return;
+    e.preventDefault();
+    if (e.key === 'ArrowDown') focusDock(sel);
+  };
+
   const onDockKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowUp' && bannerRef.current) {
+      e.preventDefault();
+      bannerRef.current.focus();
+      return;
+    }
     const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
     if (!step) return;
     e.preventDefault();
@@ -685,7 +743,7 @@ function TvHome({ state }: { state: MdmState }) {
   }
 
   return (
-    <div className={`w-screen h-screen ${appearance.dimWallpaper ? 'bg-[#05070c]' : 'bg-gradient-to-b from-[#0b1020] to-[#05070c]'} text-white flex flex-col select-none`}>
+    <div ref={homeRef} className={`w-screen h-screen ${appearance.dimWallpaper ? 'bg-[#05070c]' : 'bg-gradient-to-b from-[#0b1020] to-[#05070c]'} text-white flex flex-col select-none`}>
       <header className="flex items-center justify-between px-16 pt-10">
         <Brand state={state} size="sm" />
         <span className="text-3xl font-light tabular-nums">{clock}</span>
@@ -711,14 +769,33 @@ function TvHome({ state }: { state: MdmState }) {
         </div>
       )}
 
+      {notice && (
+        <NoticeBanner
+          notice={notice}
+          more={noticeCount - 1}
+          buttonRef={bannerRef}
+          onOpen={() => onReadNotice(notice.id)}
+          onKeyDown={onBannerKey}
+        />
+      )}
+
       <main className="flex-1 flex flex-col items-center justify-center space-y-6">
         <div
-          className="h-44 w-44 rounded-full flex items-center justify-center bg-[radial-gradient(circle_at_35%_30%,rgba(139,92,255,.6),rgba(71,191,255,.22))]"
+          className="relative h-44 w-44 rounded-full flex items-center justify-center bg-[radial-gradient(circle_at_35%_30%,rgba(139,92,255,.6),rgba(71,191,255,.22))]"
           aria-hidden
         >
-          <AppIcon app={cur} size="lg" />
+          {cur.install ? <InstallFace app={cur} size="lg" /> : <AppIcon app={cur} size="lg" />}
         </div>
         <div className="text-4xl font-semibold">{cur.name}</div>
+        {cur.install && (
+          <div className="flex items-center space-x-4">
+            <span className="flex items-center space-x-2 rounded-full bg-sky-400 px-5 py-2 text-2xl font-semibold text-[#05070c]">
+              <DownloadIcon className="h-6 w-6" />
+              <span>Instalar</span>
+            </span>
+            <span className="text-xl text-white/60">Presioná OK para abrir Play Store</span>
+          </div>
+        )}
       </main>
 
       <div
@@ -732,12 +809,21 @@ function TvHome({ state }: { state: MdmState }) {
             key={app.id}
             data-index={i}
             role="menuitem"
-            aria-label={app.name}
+            aria-label={app.install ? `Instalar ${app.name}` : app.name}
             onFocus={() => setSel(i)}
             onClick={() => activate(app)}
-            className="h-20 w-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center outline-none transition-transform focus:scale-110 focus:bg-white/20 focus:border-white/70 hover:bg-white/10"
+            className={`relative h-20 w-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center outline-none transition-transform focus:scale-110 focus:bg-white/20 focus:border-white/70 hover:bg-white/10 ${app.install ? 'focus:ring-4 focus:ring-white/60' : ''}`}
           >
-            <AppIcon app={app} size="sm" />
+            {app.install ? (
+              <>
+                <InstallFace app={app} size="sm" />
+                <span className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-sky-400 border-2 border-[#05070c] text-[#05070c] flex items-center justify-center">
+                  <DownloadIcon className="h-5 w-5" />
+                </span>
+              </>
+            ) : (
+              <AppIcon app={app} size="sm" />
+            )}
           </button>
         ))}
       </div>
@@ -747,17 +833,50 @@ function TvHome({ state }: { state: MdmState }) {
 
 const MdmGate: React.FC = () => {
   const state = useAgentState();
+  const notices = useNotices(state);
+  const [readingId, setReadingId] = useState<string | null>(null);
+  const stopReading = useCallback(() => setReadingId(null), []);
 
+  // Una emergencia se muestra siempre, también con el equipo bloqueado o sin vincular: avisa de un riesgo,
+  // no es parte del servicio. El resto de los avisos es del inicio y solo existe con el equipo activo.
+  const active = state.mode === 'active';
+  const reading = active && notices.banner && notices.banner.id === readingId ? notices.banner : null;
+  const modal = notices.emergency ?? reading;
+  const { ack } = notices;
+
+  let screen: ReactNode;
   switch (state.mode) {
     case 'unpaired':
-      return <PairingScreen state={state} />;
+      screen = <PairingScreen state={state} />;
+      break;
     case 'locked':
-      return <LockScreen state={state} />;
+      screen = <LockScreen state={state} />;
+      break;
     case 'active':
-      return <TvHome state={state} />;
+      screen = <TvHome state={state} notice={notices.banner} noticeCount={notices.bannerCount} onReadNotice={setReadingId} />;
+      break;
     default:
-      return <StartingScreen state={state} />;
+      screen = <StartingScreen state={state} />;
   }
+
+  // El aviso va antes en el documento: al volver de una app, el equipo enfoca el primer botón
+  // con data-index="0" y tiene que ser "Entendido", no el dock que quedó detrás.
+  return (
+    <>
+      {modal && (
+        <NoticeModal
+          key={modal.id}
+          notice={modal}
+          companyName={state.companyName}
+          now={notices.now}
+          pending={(modal.severity === 'emergencia' ? notices.emergencyCount : notices.bannerCount) - 1}
+          onAck={() => ack(modal.id)}
+          onLater={modal.severity === 'emergencia' ? undefined : stopReading}
+        />
+      )}
+      {screen}
+    </>
+  );
 };
 
 export default MdmGate;

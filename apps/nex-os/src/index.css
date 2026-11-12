@@ -868,3 +868,27 @@ html.nex-tv {
     border: 1px solid var(--border-color) !important;
   }
 }
+/* NEX TV: avisos de la empresa. Solo transform y opacity: baratos en equipos de 1 GB. */
+@keyframes nex-notice-in {
+  from { opacity: 0; transform: translateY(1rem); }
+  to { opacity: 1; transform: none; }
+}
+.nex-notice-in {
+  animation: nex-notice-in 0.25s ease-out both;
+}
+@keyframes nex-notice-ring {
+  from { opacity: 0.7; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.7); }
+}
+.nex-notice-ring {
+  animation: nex-notice-ring 1.6s ease-out 3 both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nex-notice-in,
+  .nex-notice-ring {
+    animation: none;
+  }
+  .nex-notice-ring {
+    opacity: 0;
+  }
+}

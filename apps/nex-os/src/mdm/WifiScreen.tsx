@@ -61,6 +61,8 @@ export default function WifiScreen({ token, onClose }: { token: string | null; o
     const close = (e: KeyboardEvent) => {
       // Retroceso dentro del campo permite corregir el texto con el teclado.
       if (!BACK_KEYS.has(e.key) || (e.key === 'Backspace' && e.target instanceof HTMLInputElement)) return;
+      // Con un aviso a pantalla completa encima, "Atrás" es del aviso.
+      if (document.querySelector('[data-nex-modal]')) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       onClose();
