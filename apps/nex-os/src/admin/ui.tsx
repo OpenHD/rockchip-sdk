@@ -253,6 +253,39 @@ export function Switch({
   );
 }
 
+/** Casilla nativa con un área de toque cómoda. `indeterminate` = marcada solo en parte (seleccionar todo). */
+export function Checkbox({
+  checked,
+  indeterminate = false,
+  onChange,
+  label,
+  className = '',
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate && !checked;
+  }, [indeterminate, checked]);
+  return (
+    <label className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg transition hover:bg-fill-2 ${className}`} onClick={(e) => e.stopPropagation()}>
+      <input
+        ref={ref}
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 cursor-pointer rounded"
+        style={{ accentColor: 'var(--accent-solid)' }}
+      />
+    </label>
+  );
+}
+
 export function Chip({ active, onClick, children, count }: { active: boolean; onClick: () => void; children: ReactNode; count?: number }) {
   return (
     <button

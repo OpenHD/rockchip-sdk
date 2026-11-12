@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
-/** Rutas del panel en el hash (#/c/<empresa>/<sección>?f=<filtro>&d=<equipo>): el botón "atrás" funciona. */
-export type CompanySection = 'resumen' | 'equipos' | 'apps' | 'marca' | 'avisos' | 'comunicados' | 'miembros' | 'api' | 'auditoria';
+/** Rutas del panel en el hash (#/c/<empresa>/<sección>?f=<filtro>&z=<zona>&d=<equipo>): el botón "atrás" funciona. */
+export type CompanySection = 'resumen' | 'equipos' | 'zonas' | 'apps' | 'marca' | 'avisos' | 'comunicados' | 'miembros' | 'api' | 'auditoria';
 export type NexSection = 'nueva-empresa' | 'catalogo' | 'firmware' | 'pirateria';
 
 export type Route =
-  | { scope: 'company'; companyId: string; section: CompanySection; filter?: string; device?: string }
+  | { scope: 'company'; companyId: string; section: CompanySection; filter?: string; device?: string; /** Equipos: id de zona o 'sin-zona'. */ zone?: string }
   | { scope: 'nex'; section: NexSection }
   | { scope: 'home' };
 
-const COMPANY_SECTIONS: CompanySection[] = ['resumen', 'equipos', 'apps', 'marca', 'avisos', 'comunicados', 'miembros', 'api', 'auditoria'];
+const COMPANY_SECTIONS: CompanySection[] = ['resumen', 'equipos', 'zonas', 'apps', 'marca', 'avisos', 'comunicados', 'miembros', 'api', 'auditoria'];
 const NEX_SECTIONS: NexSection[] = ['nueva-empresa', 'catalogo', 'firmware', 'pirateria'];
 
 export function parseHash(hash: string): Route {
@@ -18,7 +18,7 @@ export function parseHash(hash: string): Route {
   const params = new URLSearchParams(query);
   if (parts[0] === 'c' && parts[1]) {
     const section = COMPANY_SECTIONS.find((s) => s === parts[2]) ?? 'resumen';
-    return { scope: 'company', companyId: parts[1], section, filter: params.get('f') ?? undefined, device: params.get('d') ?? undefined };
+    return { scope: 'company', companyId: parts[1], section, filter: params.get('f') ?? undefined, device: params.get('d') ?? undefined, zone: params.get('z') ?? undefined };
   }
   if (parts[0] === 'nex') {
     const section = NEX_SECTIONS.find((s) => s === parts[1]);
@@ -31,6 +31,7 @@ export function formatRoute(r: Route): string {
   if (r.scope === 'company') {
     const q = new URLSearchParams();
     if (r.filter) q.set('f', r.filter);
+    if (r.zone) q.set('z', r.zone);
     if (r.device) q.set('d', r.device);
     const qs = q.toString();
     return `#/c/${r.companyId}/${r.section}${qs ? `?${qs}` : ''}`;

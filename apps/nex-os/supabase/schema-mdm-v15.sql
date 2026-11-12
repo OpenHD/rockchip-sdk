@@ -3,8 +3,9 @@
 -- * mdm_zones: zonas de cada empresa. Cada equipo puede tener una (mdm_devices.zone_id), asignada desde el panel.
 -- * Comunicados: mdm_notices.zone_ids (null = todos). El sync solo entrega a los equipos de esas zonas.
 -- * Caída masiva: mdm_check_offline (lo corre mdm-notify cada minuto) también llama a _mdm_detect_zone_outages. Una zona
---   con 3 o más equipos activos (vistos en las últimas 24 h) entra en caída cuando la mitad o más (mínimo 3) llevan más de
---   3 minutos sin sincronizar, y sale cuando quedan 20 % o menos. Eventos zone_outage / zone_restored (categoría
+--   con 3 o más equipos activos (vistos en las últimas 2 h) entra en caída cuando la mitad o más (mínimo 3) dejaron de
+--   sincronizar a la vez (hace 3 a 15 min: un corte, no TVs que se fueron apagando), y sale cuando quedan 20 % o menos
+--   sin conexión o la zona se queda sin equipos. Eventos zone_outage / zone_restored (categoría
 --   'offline', sin equipo), así llegan por Telegram/mail a las empresas con alertas de "Sin conexión".
 -- * mdm_zone_status: estado por zona para el panel.
 -- * API del ISP: POST /devices/<id>/zone {zone: "Nombre" | null} (mdm_isp_set_zone) y "zone" en el JSON del equipo.
@@ -179,36 +180,42 @@ as $$
 declare
   r record;
   v_changes int := 0;
-  v_open public.mdm_zone_outages;
 begin
+  -- Población: equipos vistos en las últimas 2 h (con caída abierta, desde 2 h antes de que empezara: si no, los que
+  -- llevan mucho caídos dejarían de contar y la zona "se recuperaría" sola). Un TV que se apagó a la tarde no cuenta.
+  -- Entra en caída cuando la mitad o más (mínimo 3) se cortaron A LA VEZ: dejaron de sincronizar hace 3 a 15 min.
   for r in
-    select z.id, z.company_id, z.name,
+    select z.id, z.company_id, z.name, o.id as outage_id, o.started_at,
            count(d.id)::int as total,
-           count(d.id) filter (where d.last_seen_at < now() - interval '3 minutes')::int as offline
+           count(d.id) filter (where d.last_seen_at < now() - interval '3 minutes')::int as offline,
+           count(d.id) filter (where d.last_seen_at < now() - interval '3 minutes'
+                                 and d.last_seen_at > now() - interval '15 minutes')::int as dropped
       from public.mdm_zones z
-      join public.mdm_devices d on d.zone_id = z.id and d.last_seen_at > now() - interval '24 hours'
-     group by z.id, z.company_id, z.name
+      left join public.mdm_zone_outages o on o.zone_id = z.id and o.ended_at is null
+      left join public.mdm_devices d on d.zone_id = z.id
+       and d.last_seen_at > least(now(), coalesce(o.started_at, now())) - interval '2 hours'
+     where o.id is not null or exists (select 1 from public.mdm_devices x where x.zone_id = z.id)
+     group by z.id, z.company_id, z.name, o.id, o.started_at
   loop
-    select * into v_open from public.mdm_zone_outages where zone_id = r.id and ended_at is null;
-    if v_open.id is null then
-      if r.total >= 3 and r.offline >= greatest(3, ceil(r.total * 0.5)) then
+    if r.outage_id is null then
+      if r.total >= 3 and r.dropped >= greatest(3, ceil(r.total * 0.5)) then
         insert into public.mdm_zone_outages (zone_id, company_id, offline, total, peak_offline)
         values (r.id, r.company_id, r.offline, r.total, r.offline);
         perform public._mdm_add_event(null, r.company_id, 'zone_outage',
           jsonb_build_object('zone', r.name, 'zone_id', r.id, 'offline', r.offline, 'total', r.total));
         v_changes := v_changes + 1;
       end if;
-    elsif r.offline <= floor(r.total * 0.2) then
-      update public.mdm_zone_outages set ended_at = now(), offline = r.offline where id = v_open.id;
+    elsif r.total = 0 or r.offline <= floor(r.total * 0.2) then
+      -- Recuperada, o la zona se quedó sin equipos.
+      update public.mdm_zone_outages set ended_at = now(), offline = r.offline where id = r.outage_id;
       perform public._mdm_add_event(null, r.company_id, 'zone_restored',
         jsonb_build_object('zone', r.name, 'zone_id', r.id, 'offline', r.offline, 'total', r.total,
-                           'minutes', (extract(epoch from now() - v_open.started_at) / 60)::int));
+                           'minutes', (extract(epoch from now() - r.started_at) / 60)::int));
       v_changes := v_changes + 1;
     else
       update public.mdm_zone_outages set offline = r.offline, total = r.total,
-             peak_offline = greatest(peak_offline, r.offline) where id = v_open.id;
+             peak_offline = greatest(peak_offline, r.offline) where id = r.outage_id;
     end if;
-    v_open := null;
   end loop;
   return v_changes;
 end;

@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { db, DEVICE_COLUMNS, run, type Device, type DeviceEvent } from './api';
+import { db, DEVICE_COLUMNS, run, type Device, type DeviceEvent, type ZoneStatus } from './api';
 import { healthScore, type HealthInputs, type HealthScore } from './health';
 
 const POLL_MS = 20_000;
 
-/** Equipos, eventos (7 días) y salud de una empresa, compartidos entre Resumen, Equipos y el detalle. */
+/** Equipos, eventos (7 días), zonas y salud de una empresa, compartidos entre Resumen, Equipos y el detalle. */
 export function useCompanyData(companyId: string) {
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [events, setEvents] = useState<DeviceEvent[]>([]);
   const [health, setHealth] = useState<ReadonlyMap<string, HealthScore>>(new Map());
   const [healthInputs, setHealthInputs] = useState<ReadonlyMap<string, HealthInputs>>(new Map());
+  const [zones, setZones] = useState<ZoneStatus[]>([]);
+  const [zonesError, setZonesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState(0);
   const [tick, setTick] = useState(0);
@@ -31,8 +33,10 @@ export function useCompanyData(companyId: string) {
       ),
       // La salud es un extra: si falla, el listado de equipos sigue andando y el puntaje sale solo de lo que informa el equipo.
       run<HealthInputs[]>(db().rpc('mdm_device_health_inputs', { p_company: companyId })).catch(() => [] as HealthInputs[]),
+      // Las zonas también: sin ellas el listado sigue andando (sin filtro por zona ni caídas).
+      run<ZoneStatus[]>(db().rpc('mdm_zone_status', { p_company: companyId })).catch((err: Error) => err),
     ]).then(
-      ([d, e, inputs]) => {
+      ([d, e, inputs, z]) => {
         if (cancelled) return;
         const byDevice = new Map((inputs ?? []).map((i) => [i.device_id, i]));
         const now = Date.now();
@@ -40,6 +44,11 @@ export function useCompanyData(companyId: string) {
         setEvents(e);
         setHealthInputs(byDevice);
         setHealth(new Map(d.map((dev) => [dev.id, healthScore(dev, byDevice.get(dev.id), now)])));
+        if (z instanceof Error) setZonesError(z.message);
+        else {
+          setZones(z ?? []);
+          setZonesError(null);
+        }
         setError(null);
         setLoadedAt(now);
       },
@@ -52,7 +61,7 @@ export function useCompanyData(companyId: string) {
     };
   }, [companyId, tick]);
 
-  return { devices, events, health, healthInputs, error, loadedAt, reload };
+  return { devices, events, health, healthInputs, zones, zonesError, error, loadedAt, reload };
 }
 
 export type CompanyData = ReturnType<typeof useCompanyData>;

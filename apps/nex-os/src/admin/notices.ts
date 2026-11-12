@@ -48,6 +48,9 @@ export interface NoticeDraft {
   /** Preset, o 'custom' para terminar en `until`. */
   duration: DurationId | 'custom';
   until: string;
+  /** v15: 'all' = todos los equipos; 'zones' = solo los de zoneIds. */
+  audience: 'all' | 'zones';
+  zoneIds: string[];
 }
 
 export const EMPTY_DRAFT: NoticeDraft = {
@@ -59,6 +62,8 @@ export const EMPTY_DRAFT: NoticeDraft = {
   startsAt: '',
   duration: '24h',
   until: '',
+  audience: 'all',
+  zoneIds: [],
 };
 
 export interface NoticeTemplate {
@@ -169,6 +174,7 @@ export function validateNotice(d: NoticeDraft, now = Date.now()): string | null 
   if (body.length > NOTICE_BODY_MAX) return `El mensaje tiene más de ${NOTICE_BODY_MAX} caracteres`;
   const pending = pendingPlaceholder(title) ?? pendingPlaceholder(body);
   if (pending) return `Completá ${pending} antes de enviar`;
+  if (d.audience === 'zones' && d.zoneIds.length === 0) return 'Elegí al menos una zona, o mandalo a todos los equipos';
   const w = noticeWindow(d, now);
   return w.ok ? null : w.error;
 }
@@ -187,6 +193,11 @@ export function noticeStatus(n: Pick<Notice, 'starts_at' | 'expires_at' | 'cance
   if (new Date(n.expires_at).getTime() <= now) return 'vencido';
   if (new Date(n.starts_at).getTime() > now) return 'programado';
   return 'activo';
+}
+
+/** Zonas para mdm_create_notice (p_zones): null = todos los equipos. */
+export function noticeZones(d: Pick<NoticeDraft, 'audience' | 'zoneIds'>): string[] | null {
+  return d.audience === 'zones' && d.zoneIds.length > 0 ? d.zoneIds : null;
 }
 
 /** Porcentaje de equipos que lo mostraron (0-100). Sin equipos: 0. */
@@ -210,4 +221,23 @@ export function formatWhen(d: Date, now = Date.now()): string {
   if (sameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1))) return `mañana ${time}`;
   if (sameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1))) return `ayer ${time}`;
   return `${d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}, ${time}`;
+}
+
+/**
+ * Qué comunicados vigentes (en pantalla o programados) toca borrar una zona, igual que mdm_delete_zone:
+ * los que iban solo a esa zona se cancelan; los que iban a varias la pierden y siguen para el resto.
+ */
+export function noticesHitByZoneDelete<T extends Pick<Notice, 'starts_at' | 'expires_at' | 'cancelled_at' | 'zone_ids'>>(
+  notices: readonly T[],
+  zoneId: string,
+  now = Date.now(),
+): { cancelled: T[]; trimmed: T[] } {
+  const live = notices.filter((n) => {
+    const s = noticeStatus(n, now);
+    return (s === 'activo' || s === 'programado') && !!n.zone_ids?.includes(zoneId);
+  });
+  return {
+    cancelled: live.filter((n) => n.zone_ids!.every((z) => z === zoneId)),
+    trimmed: live.filter((n) => n.zone_ids!.some((z) => z !== zoneId)),
+  };
 }

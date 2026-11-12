@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   LogOut,
   MailCheck,
+  MapPin,
   Megaphone,
   Menu as MenuIcon,
   MonitorX,
@@ -35,6 +36,7 @@ import { SIGNUP_ENABLED, TURNSTILE_SITE_KEY } from './config';
 import Turnstile from './Turnstile';
 import { db, run, type Company } from './api';
 import { FILTERS } from './deviceMeta';
+import { NO_ZONE } from './zones';
 import { AcceptLink, ForgotPassword, SetPassword } from './AuthFlows';
 import { parseAuthLink, passwordPending } from './authLink';
 import ChangePasswordModal from './ChangePassword';
@@ -51,6 +53,7 @@ import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/N
 import NoticesPage from './pages/Notices';
 import OverviewPage from './pages/Overview';
 import { ApiKeysPage, AuditPage, MembersPage } from './pages/Team';
+import ZonesPage from './pages/Zones';
 import { formatRoute, takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
 import { Button, Callout, EmptyState, ErrorState, ErrorText, Field, IconButton, inputClass, Menu, SearchInput, Skeleton, ToastProvider } from './ui';
 import { useCompanyData } from './useCompanyData';
@@ -360,6 +363,7 @@ const COMPANY_NAV: { group: string; items: NavItem<CompanySection>[] }[] = [
     items: [
       { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
       { id: 'equipos', label: 'Equipos', icon: Tv },
+      { id: 'zonas', label: 'Zonas', icon: MapPin },
       { id: 'comunicados', label: 'Comunicados', icon: Megaphone },
     ],
   },
@@ -535,22 +539,32 @@ function CompanyWorkspace({
   onCompanyChanged: () => void;
 }) {
   const data = useCompanyData(company.id);
-  const go = (section: CompanySection, extra: { filter?: string; device?: string } = {}) =>
+  const go = (section: CompanySection, extra: { filter?: string; device?: string; zone?: string } = {}) =>
     navigate({ scope: 'company', companyId: company.id, section, ...extra });
+  /** Equipos con un filtro de estado y, si se pasa, una zona (id o "sin-zona"). Lo que no existe se ignora. */
+  const goDevices = (filter: string, zone?: string) =>
+    go('equipos', {
+      filter: filter !== 'todos' && FILTERS.some((f) => f.id === filter) ? filter : undefined,
+      zone: zone && (zone === NO_ZONE || data.zones.some((z) => z.zone_id === zone)) ? zone : undefined,
+    });
 
   switch (route.section) {
     case 'equipos':
       return (
         <DevicesPage
-          key={route.filter ?? 'todos'}
+          key={`${route.filter ?? 'todos'}|${route.zone ?? ''}`}
           company={company}
           data={data}
           initialFilter={route.filter}
+          initialZone={route.zone}
+          goZones={() => go('zonas')}
           initialClaim={initialClaim}
           selectedId={route.device ?? null}
           onSelect={(id) => navigate({ ...route, device: id ?? undefined }, true)}
         />
       );
+    case 'zonas':
+      return <ZonesPage company={company} data={data} goDevices={goDevices} goAlerts={() => go('avisos')} />;
     case 'apps':
       return <AppsPage company={company} />;
     case 'marca':
@@ -558,7 +572,7 @@ function CompanyWorkspace({
     case 'avisos':
       return <AlertsPage company={company} onChanged={onCompanyChanged} />;
     case 'comunicados':
-      return <NoticesPage company={company} deviceCount={data.devices?.length ?? null} />;
+      return <NoticesPage company={company} deviceCount={data.devices?.length ?? null} devices={data.devices} zones={data.zones} goZones={() => go('zonas')} />;
     case 'miembros':
       return <MembersPage company={company} />;
     case 'api':
@@ -570,7 +584,8 @@ function CompanyWorkspace({
         <OverviewPage
           company={company}
           data={data}
-          goDevices={(filter) => go('equipos', { filter: FILTERS.some((f) => f.id === filter) ? filter : undefined })}
+          goDevices={goDevices}
+          goZones={() => go('zonas')}
           openDevice={(id) => go('equipos', { device: id })}
         />
       );
