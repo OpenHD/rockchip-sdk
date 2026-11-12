@@ -27,7 +27,8 @@ object Heal {
      * competiría con NEX como inicio.
      */
     private val VENDOR_APPS = listOf(
-        "com.lz.sysplugin", "com.android.tvh", "com.android.network", "com.charon.rocketfly", "com.tv.napp",
+        // com.example.himac le manda comandos al shell root de fábrica (cmd_root, TCP/40000); ver FactoryRisk.
+        "com.example.himac", "com.lz.sysplugin", "com.android.tvh", "com.android.network", "com.charon.rocketfly", "com.tv.napp",
         "com.simple.appstore.flymarket", "org.xbmc.kodi", "com.hpplay.happyplay.aw", "com.agileapps.airplay",
         "org.mozilla.tv.firefox", "com.droidlogic.mboxlauncher",
     )

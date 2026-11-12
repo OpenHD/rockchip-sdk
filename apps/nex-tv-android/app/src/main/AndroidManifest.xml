@@ -17,6 +17,10 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SET_TIME_ZONE" tools:ignore="ProtectedPermissions" />
+    <!-- Desinstalar las apps del ISP que NEX instaló cuando el ISP las quita del panel (ManagedApps). -->
+    <uses-permission android:name="android.permission.DELETE_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <!-- Ver si las apps del ISP ya están instaladas (también las que no tienen ícono de launcher). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
     <!-- Para listar la Play Store y las apps del usuario como mosaicos de NEX-OS. -->
     <queries>
@@ -87,6 +91,7 @@
         </activity>
 
         <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <receiver android:name=".ManagedAppReceiver" android:exported="false" />
         <!-- Al arrancar: como app de sistema, NEX vuelve a dejar el equipo protegido (Heal). -->
         <receiver android:name=".BootReceiver" android:exported="false">
             <intent-filter>
