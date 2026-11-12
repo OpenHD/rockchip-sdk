@@ -56,17 +56,17 @@ const CATEGORIES = Object.keys(CATEGORY_LABELS) as NoticeCategory[];
 const SEVERITY_ICON: Record<NoticeSeverity, LucideIcon> = { info: Info, importante: TriangleAlert, emergencia: Siren };
 const SEVERITIES: NoticeSeverity[] = ['info', 'importante', 'emergencia'];
 const SEVERITY_SELECTED: Record<NoticeSeverity, string> = {
-  info: 'border-indigo-400/60 bg-indigo-500/10',
-  importante: 'border-amber-500/50 bg-amber-500/10',
-  emergencia: 'border-rose-500/50 bg-rose-500/10',
+  info: 'border-accent bg-accent-soft',
+  importante: 'border-warn bg-warn-soft',
+  emergencia: 'border-danger bg-danger-soft',
 };
 const SEVERITY_ICON_TONE: Record<NoticeSeverity, string> = {
-  info: 'text-indigo-300',
-  importante: 'text-amber-300',
-  emergencia: 'text-rose-300',
+  info: 'text-accent',
+  importante: 'text-warn',
+  emergencia: 'text-danger',
 };
 
-const LABEL = 'text-xs font-medium text-zinc-300';
+const LABEL = 'text-xs font-medium text-fg-2';
 
 // ---------------------------------------------------------------------------
 // Selector tipo radio (teclado: flechas para moverse, como un grupo de radios nativo)
@@ -115,7 +115,7 @@ function RadioCards<T extends string>({
               tabIndex={selected ? 0 : -1}
               onClick={() => onChange(o)}
               onKeyDown={(e) => onKey(e, i)}
-              className={`rounded-xl border text-left outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500/40 ${optionClass(o, selected)}`}
+              className={`rounded-xl border text-left outline-none transition focus-visible:ring-2 focus-visible:ring-accent ${optionClass(o, selected)}`}
             >
               {render(o, selected)}
             </button>
@@ -132,7 +132,7 @@ function RadioCards<T extends string>({
 
 /*
  * La pantalla del TV es oscura también con el panel en tema claro. Por eso acá adentro se usa la paleta slate y
- * colores fijos (red/amber/sky-400…): admin-light.css no los remapea, a diferencia de text-white o text-zinc-*.
+ * colores fijos (red/amber/sky-400…) en vez de los tokens del panel (text-fg, bg-surface…), que cambian con el tema.
  * Los tamaños van en cqw para que el texto escale con el ancho del marco, como en una pantalla real.
  */
 const TV_ACCENT: Record<NoticeSeverity, { bar: string; icon: string }> = {
@@ -225,11 +225,11 @@ function SeenProgress({ notice }: { notice: Notice }) {
   return (
     <div className="mt-2.5 max-w-sm">
       <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-        <span className="flex items-center gap-1.5 text-zinc-400"><Eye className="h-3.5 w-3.5" aria-hidden /> {text}</span>
-        {notice.devices > 0 && <span className="tabular-nums text-zinc-500">{pct}%</span>}
+        <span className="flex items-center gap-1.5 text-fg-3"><Eye className="h-3.5 w-3.5" aria-hidden /> {text}</span>
+        {notice.devices > 0 && <span className="tabular-nums text-fg-4">{pct}%</span>}
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={text}>
-        <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-400' : 'bg-indigo-400'}`} style={{ width: `${pct}%` }} />
+      <div className="h-1.5 overflow-hidden rounded-full bg-fill-2" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={text}>
+        <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-ok' : 'bg-accent'}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -255,17 +255,17 @@ function NoticeRow({ notice, status, now, onCancel, onReuse }: {
 
   return (
     <li className={`flex gap-3 px-4 py-4 sm:gap-4 sm:px-5 ${live ? '' : 'opacity-75'}`}>
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${live ? 'bg-indigo-500/10 text-indigo-300' : 'bg-white/[0.05] text-zinc-400'}`}>
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${live ? 'bg-accent-soft text-accent' : 'bg-fill text-fg-3'}`}>
         <Icon className="h-4 w-4" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h3 className="min-w-0 break-words text-sm font-semibold text-zinc-100">{notice.title}</h3>
+          <h3 className="min-w-0 break-words text-sm font-semibold text-fg">{notice.title}</h3>
           <Badge tone={STATUS_LABELS[status].tone}>{STATUS_LABELS[status].label}</Badge>
           {notice.severity !== 'info' && <Badge tone={severity.tone} icon={SEVERITY_ICON[notice.severity]}>{severity.label}</Badge>}
         </div>
-        <p className="mt-1 line-clamp-2 whitespace-pre-line break-words text-sm text-zinc-400">{notice.body}</p>
-        <p className="mt-1.5 text-xs text-zinc-500">{CATEGORY_LABELS[notice.category] ?? notice.category} · {when}</p>
+        <p className="mt-1 line-clamp-2 whitespace-pre-line break-words text-sm text-fg-3">{notice.body}</p>
+        <p className="mt-1.5 text-xs text-fg-4">{CATEGORY_LABELS[notice.category] ?? notice.category} · {when}</p>
         {status !== 'programado' && <SeenProgress notice={notice} />}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
@@ -413,7 +413,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
         subtitle={`Mensajes que aparecen en la pantalla de todos los TV de ${company.name}: cortes, alertas del clima, campañas de salud y avisos municipales.`}
       />
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+      <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
         <Card title="Nuevo comunicado" description={`Lo ven ${audience} la próxima vez que estén encendidos dentro del período que elijas.`}>
           <form
             className="flex flex-col gap-5"
@@ -438,7 +438,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
               onChange={(v) => set('category', v)}
               className="grid grid-cols-2 gap-2 sm:grid-cols-5"
               optionClass={(_o, selected) => `flex items-center gap-2 px-3 py-2.5 text-sm sm:flex-col sm:gap-1.5 sm:px-2 sm:py-3 sm:text-center sm:text-xs ${
-                selected ? 'border-indigo-400/60 bg-indigo-500/10 text-indigo-200' : 'border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200'
+                selected ? 'border-accent bg-accent-soft text-accent' : 'border-line text-fg-3 hover:border-line-strong hover:text-fg-2'
               }`}
               render={(o) => {
                 const Icon = CATEGORY_ICON[o];
@@ -452,16 +452,16 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
               options={SEVERITIES}
               onChange={(v) => set('severity', v)}
               className="grid gap-2 sm:grid-cols-3"
-              optionClass={(o, selected) => `px-3 py-3 ${selected ? SEVERITY_SELECTED[o] : 'border-white/10 hover:border-white/20'}`}
+              optionClass={(o, selected) => `px-3 py-3 ${selected ? SEVERITY_SELECTED[o] : 'border-line-strong hover:bg-fill'}`}
               render={(o, selected) => {
                 const Icon = SEVERITY_ICON[o];
                 return (
                   <>
-                    <span className={`flex items-center gap-2 text-sm font-semibold ${selected ? 'text-white' : 'text-zinc-300'}`}>
-                      <Icon className={`h-4 w-4 shrink-0 ${selected ? SEVERITY_ICON_TONE[o] : 'text-zinc-500'}`} aria-hidden />
+                    <span className={`flex items-center gap-2 text-sm font-semibold ${selected ? 'text-fg' : 'text-fg-2'}`}>
+                      <Icon className={`h-4 w-4 shrink-0 ${selected ? SEVERITY_ICON_TONE[o] : 'text-fg-4'}`} aria-hidden />
                       {SEVERITY_META[o].label}
                     </span>
-                    <span className="mt-1 block text-xs text-zinc-500">{SEVERITY_META[o].tv}</span>
+                    <span className="mt-1 block text-xs text-fg-4">{SEVERITY_META[o].tv}</span>
                   </>
                 );
               }}
@@ -470,7 +470,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
             <div className="flex flex-col gap-1.5">
               <div className="flex items-baseline justify-between gap-3">
                 <label htmlFor={ids.title} className={LABEL}>Título</label>
-                <span id={ids.titleCount} className={`text-xs tabular-nums ${draft.title.length >= NOTICE_TITLE_MAX ? 'text-amber-300' : 'text-zinc-500'}`}>
+                <span id={ids.titleCount} className={`text-xs tabular-nums ${draft.title.length >= NOTICE_TITLE_MAX ? 'text-warn' : 'text-fg-4'}`}>
                   {draft.title.length}/{NOTICE_TITLE_MAX}
                 </span>
               </div>
@@ -489,7 +489,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
             <div className="flex flex-col gap-1.5">
               <div className="flex items-baseline justify-between gap-3">
                 <label htmlFor={ids.body} className={LABEL}>Mensaje</label>
-                <span id={ids.bodyCount} className={`text-xs tabular-nums ${draft.body.length >= NOTICE_BODY_MAX ? 'text-amber-300' : 'text-zinc-500'}`}>
+                <span id={ids.bodyCount} className={`text-xs tabular-nums ${draft.body.length >= NOTICE_BODY_MAX ? 'text-warn' : 'text-fg-4'}`}>
                   {draft.body.length}/{NOTICE_BODY_MAX}
                 </span>
               </div>
@@ -502,7 +502,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
                 value={draft.body}
                 onChange={(e) => set('body', e.target.value)}
               />
-              {templateId && <span className="text-xs text-zinc-500">Reemplazá lo que está entre [corchetes] con tus datos.</span>}
+              {templateId && <span className="text-xs text-fg-4">Reemplazá lo que está entre [corchetes] con tus datos.</span>}
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
@@ -541,7 +541,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
                   <div className="mt-2">
                     <label htmlFor={ids.until} className="sr-only">Fecha y hora de fin</label>
                     <input id={ids.until} type="datetime-local" className={inputClass} min={minLocal} value={draft.until} onChange={(e) => set('until', e.target.value)} />
-                    <span className="mt-1 block text-xs text-zinc-500">Hasta {NOTICE_MAX_DAYS} días.</span>
+                    <span className="mt-1 block text-xs text-fg-4">Hasta {NOTICE_MAX_DAYS} días.</span>
                   </div>
                 )}
               </div>
@@ -549,9 +549,9 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
 
             <ErrorText error={formError} />
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-4">
-              <p className="flex min-w-0 items-center gap-2 text-xs text-zinc-400">
-                <CalendarClock className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+              <p className="flex min-w-0 items-center gap-2 text-xs text-fg-3">
+                <CalendarClock className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
                 {window_.ok
                   ? <span>{draft.startMode === 'now' ? 'Desde ahora' : `Desde ${formatWhen(window_.start, now)}`} hasta {formatWhen(window_.end, now)}.</span>
                   : <span>{window_.error}.</span>}
@@ -566,14 +566,14 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
               </div>
             </div>
             {sentToday >= NOTICES_PER_DAY - 10 && (
-              <p className={`-mt-2 text-xs ${remaining === 0 ? 'text-amber-300' : 'text-zinc-500'}`}>
+              <p className={`-mt-2 text-xs ${remaining === 0 ? 'text-warn' : 'text-fg-4'}`}>
                 {remaining === 0
                   ? `Ya enviaste ${NOTICES_PER_DAY} comunicados en las últimas 24 horas, que es el máximo.`
                   : `Enviaste ${sentToday} comunicados en las últimas 24 horas. El máximo es ${NOTICES_PER_DAY}.`}
               </p>
             )}
             {deviceCount === 0 && (
-              <p className="-mt-2 text-xs text-amber-300">Todavía no hay equipos vinculados: por ahora no lo va a ver nadie.</p>
+              <p className="-mt-2 text-xs text-warn">Todavía no hay equipos vinculados: por ahora no lo va a ver nadie.</p>
             )}
           </form>
         </Card>
@@ -581,7 +581,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
         <div className="xl:sticky xl:top-6">
           <Card title="Así se ve en el TV" description={SEVERITY_META[draft.severity].tv}>
             <TvPreview title={draft.title} body={draft.body} category={draft.category} severity={draft.severity} companyName={company.name} />
-            <p className="mt-3 text-xs text-zinc-500">
+            <p className="mt-3 text-xs text-fg-4">
               Vista aproximada. El TV avisa al panel cuando lo muestra: así sabés cuántos equipos lo vieron.
             </p>
           </Card>
@@ -590,7 +590,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
 
       <section className="mt-8" aria-labelledby="comunicados-enviados">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 id="comunicados-enviados" className="text-base font-semibold text-zinc-100">Enviados</h2>
+          <h2 id="comunicados-enviados" className="text-base font-semibold text-fg">Enviados</h2>
           {notices && notices.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {LIST_FILTERS.map((f) => (
@@ -602,7 +602,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
         <ErrorText error={loadError} />
         <Card padded={false}>
           {!notices ? (
-            <div className="flex flex-col gap-3 p-5">
+            <div className="flex flex-col gap-3 p-4 sm:p-5">
               {loadError ? <Button variant="secondary" className="self-start" onClick={reload}>Reintentar</Button> : [0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
             </div>
           ) : notices.length === 0 ? (
@@ -612,14 +612,14 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
           ) : shown.length === 0 ? (
             <EmptyState icon={Megaphone} title="No hay comunicados en este estado">Probá con otro filtro.</EmptyState>
           ) : (
-            <ul className="divide-y divide-white/[0.05] pb-1">
+            <ul className="divide-y divide-line pb-1">
               {shown.map((n) => (
                 <NoticeRow key={n.id} notice={n} status={statuses.get(n.id)!} now={now} onCancel={() => setCancelTarget(n)} onReuse={() => reuse(n)} />
               ))}
             </ul>
           )}
         </Card>
-        {notices && notices.length >= 50 && <p className="mt-2 text-xs text-zinc-500">Se muestran los últimos 50.</p>}
+        {notices && notices.length >= 50 && <p className="mt-2 text-xs text-fg-4">Se muestran los últimos 50.</p>}
       </section>
 
       {confirming && window_.ok && (
@@ -639,20 +639,20 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
           <div className="flex flex-col gap-4">
             <TvPreview title={draft.title} body={draft.body} category={draft.category} severity={draft.severity} companyName={company.name} />
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-              <dt className="text-zinc-500">Empieza</dt>
-              <dd className="text-zinc-200">{draft.startMode === 'now' ? 'Ahora (llega a los TV en el próximo minuto)' : formatWhen(window_.start, now)}</dd>
-              <dt className="text-zinc-500">Termina</dt>
-              <dd className="text-zinc-200">{formatWhen(window_.end, now)}</dd>
-              <dt className="text-zinc-500">Aparece como</dt>
-              <dd className="text-zinc-200">{SEVERITY_META[draft.severity].label} · {CATEGORY_LABELS[draft.category]}</dd>
+              <dt className="text-fg-4">Empieza</dt>
+              <dd className="text-fg-2">{draft.startMode === 'now' ? 'Ahora (llega a los TV en el próximo minuto)' : formatWhen(window_.start, now)}</dd>
+              <dt className="text-fg-4">Termina</dt>
+              <dd className="text-fg-2">{formatWhen(window_.end, now)}</dd>
+              <dt className="text-fg-4">Aparece como</dt>
+              <dd className="text-fg-2">{SEVERITY_META[draft.severity].label} · {CATEGORY_LABELS[draft.category]}</dd>
             </dl>
             {draft.severity === 'emergencia' && (
-              <p className="flex items-start gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+              <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
                 <Siren className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                 Interrumpe lo que cada cliente esté viendo hasta que lo acepte con el control. Usalo solo para emergencias reales.
               </p>
             )}
-            <p className="text-xs text-zinc-500">Una vez enviado no se puede editar: si hay un error, cancelalo y mandá uno nuevo.</p>
+            <p className="text-xs text-fg-4">Una vez enviado no se puede editar: si hay un error, cancelalo y mandá uno nuevo.</p>
           </div>
         </Modal>
       )}
@@ -669,7 +669,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
             </>
           }
         >
-          <p className="text-sm text-zinc-300">
+          <p className="text-sm text-fg-2">
             {statuses.get(cancelTarget.id) === 'programado'
               ? 'No se va a mostrar en ningún TV.'
               : 'Deja de mostrarse en los TV en el próximo minuto. Los clientes que ya lo vieron no reciben ningún aviso.'}

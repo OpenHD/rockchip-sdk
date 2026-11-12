@@ -135,7 +135,7 @@ function AddAndroidAppModal({ company, existing, onClose, onDone }: {
               aria-checked={mode === id}
               disabled={busy}
               onClick={() => { setMode(id); setError(null); }}
-              className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition ${mode === id ? 'border-indigo-400/40 bg-indigo-500/10 text-white' : 'border-white/[0.07] text-zinc-400 hover:text-zinc-200'}`}
+              className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm transition ${mode === id ? 'border-accent bg-accent-soft text-fg' : 'border-line text-fg-3 hover:text-fg-2'}`}
             >
               <Icon className="h-4 w-4" aria-hidden /> {label}
             </button>
@@ -147,14 +147,14 @@ function AddAndroidAppModal({ company, existing, onClose, onDone }: {
             <Field
               label="Link de la Play Store o paquete"
               hint={playValid
-                ? <span className="flex items-center gap-1.5 text-emerald-300"><CircleCheck className="h-3.5 w-3.5 shrink-0" aria-hidden /><span className="break-all font-mono">{playPackage}</span></span>
+                ? <span className="flex items-center gap-1.5 text-ok"><CircleCheck className="h-3.5 w-3.5 shrink-0" aria-hidden /><span className="break-all font-mono">{playPackage}</span></span>
                 : playInput.trim()
-                  ? <span className="text-amber-300">No reconocemos el paquete. Pegá el link completo de la ficha o el nombre (com.empresa.app).</span>
+                  ? <span className="text-warn">No reconocemos el paquete. Pegá el link completo de la ficha o el nombre (com.empresa.app).</span>
                   : 'Ej.: https://play.google.com/store/apps/details?id=com.empresa.app'}
             >
               <input autoFocus className={inputClass} value={playInput} onChange={(e) => setPlayInput(e.target.value)} placeholder="https://play.google.com/store/apps/details?id=…" />
             </Field>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-fg-4">
               El TV muestra la app con un botón "Instalar" que abre la Play Store; el cliente confirma ahí (Android no deja instalar de la Play Store sin ese paso). La Play Store tiene que tener una cuenta de Google iniciada.
             </p>
           </>
@@ -168,22 +168,22 @@ function AddAndroidAppModal({ company, existing, onClose, onDone }: {
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={onDrop}
-              className={`flex flex-col items-center gap-1 rounded-xl border border-dashed px-4 py-6 text-sm text-zinc-300 transition hover:border-indigo-400/50 disabled:opacity-60 ${dragging ? 'border-indigo-400/70 bg-indigo-500/10' : 'border-white/15'}`}
+              className={`flex flex-col items-center gap-1 rounded-xl border border-dashed px-4 py-6 text-sm text-fg-2 transition hover:border-accent disabled:opacity-60 ${dragging ? 'border-accent bg-accent-soft' : 'border-line-strong'}`}
             >
               {reading
-                ? <LoaderCircle className="h-6 w-6 animate-spin text-zinc-400" aria-hidden />
-                : <FileUp className="h-6 w-6 text-zinc-400" aria-hidden />}
+                ? <LoaderCircle className="h-6 w-6 animate-spin text-fg-3" aria-hidden />
+                : <FileUp className="h-6 w-6 text-fg-3" aria-hidden />}
               <span className="max-w-full break-all">{reading ? 'Leyendo el APK…' : file ? file.name : 'Elegí el APK o arrastralo acá'}</span>
-              <span className="text-xs text-zinc-500">{file && !reading ? 'Tocá para cambiarlo' : 'Hasta 200 MB'}</span>
+              <span className="text-xs text-fg-4">{file && !reading ? 'Tocá para cambiarlo' : 'Hasta 200 MB'}</span>
             </button>
             {info && (
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl border border-white/[0.07] px-4 py-3 text-xs">
-                <dt className="text-zinc-500">Paquete</dt><dd className="break-all font-mono text-zinc-200">{info.package}</dd>
-                <dt className="text-zinc-500">Versión</dt><dd className="text-zinc-200">{info.versionName ?? '—'} ({info.versionCode})</dd>
-                <dt className="text-zinc-500">Tamaño</dt><dd className="text-zinc-200">{formatSize(file?.size ?? null)}</dd>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-xl border border-line px-4 py-3 text-xs">
+                <dt className="text-fg-4">Paquete</dt><dd className="break-all font-mono text-fg-2">{info.package}</dd>
+                <dt className="text-fg-4">Versión</dt><dd className="text-fg-2">{info.versionName ?? '—'} ({info.versionCode})</dd>
+                <dt className="text-fg-4">Tamaño</dt><dd className="text-fg-2">{formatSize(file?.size ?? null)}</dd>
               </dl>
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-fg-4">
               Los TV la descargan e instalan solos, sin que el cliente toque nada. Para actualizarla, subí el APK nuevo con el mismo paquete y un versionCode mayor. Te vamos a pedir el código de segundo factor.
             </p>
           </>
@@ -193,13 +193,13 @@ function AddAndroidAppModal({ company, existing, onClose, onDone }: {
           <input className={inputClass} maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="TV Play" />
         </Field>
         {replacing && (
-          <p className="text-xs text-amber-300">
+          <p className="text-xs text-warn">
             {replacing.name} ya está cargada con ese paquete: se reemplaza
             {mode === 'apk' && replacing.source === 'apk' && info ? ` (versión ${replacing.version_name ?? replacing.version_code} → ${info.versionName ?? info.versionCode})` : ''}.
           </p>
         )}
         {busy && mode === 'apk' && (
-          <p className="flex items-center gap-2 text-xs text-zinc-400" role="status">
+          <p className="flex items-center gap-2 text-xs text-fg-3" role="status">
             <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
             Subiendo el APK. Puede tardar unos minutos: no cierres esta pestaña.
           </p>
@@ -268,8 +268,8 @@ export default function AndroidAppsSection({ company }: { company: Company }) {
     <section className="mt-10">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-100">Apps Android de tu empresa</h2>
-          <p className="text-sm text-zinc-500">
+          <h2 className="text-base font-semibold text-fg">Apps Android de tu empresa</h2>
+          <p className="text-sm text-fg-4">
             Para TV box con NEX TV (Android). Cargá tu propia app o cualquiera de la Play Store
             {apps && apps.length > 0 ? ` · ${apps.filter((a) => a.enabled).length} de ${apps.length} habilitadas` : ''}.
           </p>
@@ -284,17 +284,17 @@ export default function AndroidAppsSection({ company }: { company: Company }) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {apps.map((app) => (
-            <div key={app.package} className={`flex items-center gap-4 rounded-2xl border p-4 ${app.enabled ? 'border-indigo-400/30 bg-indigo-500/[0.06]' : 'border-white/[0.07] bg-white/[0.025]'}`}>
+            <div key={app.package} className={`flex items-center gap-4 rounded-xl border p-4 shadow-card ${app.enabled ? 'border-accent bg-accent-soft' : 'border-line bg-surface'}`}>
               <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-lg font-bold text-white ${appGradient(app.package)}`}>
                 {app.name.charAt(0)}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold text-zinc-100">{app.name}</span>
+                  <span className="truncate text-sm font-semibold text-fg">{app.name}</span>
                   <span className="shrink-0"><Badge tone={app.source === 'apk' ? 'info' : 'neutral'}>{app.source === 'apk' ? 'APK' : 'Play Store'}</Badge></span>
                 </div>
-                <div className="truncate font-mono text-xs text-zinc-500" title={app.package}>{app.package}</div>
-                <div className="text-xs text-zinc-500">
+                <div className="truncate font-mono text-xs text-fg-4" title={app.package}>{app.package}</div>
+                <div className="text-xs text-fg-4">
                   {app.source === 'apk'
                     ? `v${app.version_name ?? app.version_code} · ${formatSize(app.size)} · ${app.enabled ? 'se instala sola' : 'desinstalada de los TV'}`
                     : app.enabled ? 'El cliente la instala desde el TV' : 'No aparece en los TV'}
@@ -320,7 +320,7 @@ export default function AndroidAppsSection({ company }: { company: Company }) {
             </>
           )}
         >
-          <p className="text-sm text-zinc-300">
+          <p className="text-sm text-fg-2">
             {removing.source === 'apk'
               ? 'Se desinstala sola de todos los TV de tu empresa en los próximos minutos y se borra el APK que subiste.'
               : 'Deja de aparecer en los TV. Si un cliente ya la instaló desde la Play Store, le queda instalada.'}

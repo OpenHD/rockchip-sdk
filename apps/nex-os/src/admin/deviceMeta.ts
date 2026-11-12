@@ -51,12 +51,12 @@ export function healthIssues(d: Device): string[] {
 }
 
 export function paymentText(d: Device, c: Company): { text: string; tone: string } {
-  if (!d.paid_until) return { text: 'Sin control de pago', tone: 'text-zinc-500' };
+  if (!d.paid_until) return { text: 'Sin control de pago', tone: 'text-fg-4' };
   const days = daysFromToday(d.paid_until);
-  if (days < 0) return { text: `Vencido hace ${-days} ${-days === 1 ? 'día' : 'días'}`, tone: 'text-rose-300' };
-  if (days === 0) return { text: 'Vence hoy', tone: 'text-amber-300' };
-  if (days <= c.payment_warning_days) return { text: `Vence en ${days} ${days === 1 ? 'día' : 'días'}`, tone: 'text-amber-300' };
-  return { text: `Hasta ${formatDate(d.paid_until)}`, tone: 'text-zinc-300' };
+  if (days < 0) return { text: `Vencido hace ${-days} ${-days === 1 ? 'día' : 'días'}`, tone: 'text-danger' };
+  if (days === 0) return { text: 'Vence hoy', tone: 'text-warn' };
+  if (days <= c.payment_warning_days) return { text: `Vence en ${days} ${days === 1 ? 'día' : 'días'}`, tone: 'text-warn' };
+  return { text: `Hasta ${formatDate(d.paid_until)}`, tone: 'text-fg-2' };
 }
 
 export type Filter = 'todos' | 'online' | 'bloqueados' | 'restringidos' | 'vencidos' | 'por-vencer' | 'offline' | 'alertas' | 'salud-baja';

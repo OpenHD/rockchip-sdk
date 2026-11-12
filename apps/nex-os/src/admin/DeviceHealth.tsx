@@ -7,7 +7,6 @@ import {
   Cpu,
   Globe,
   HardDrive,
-  HeartPulse,
   ShieldAlert,
   Upload,
   LoaderCircle,
@@ -41,32 +40,19 @@ import {
   type NetDiag,
   type SegmentState,
 } from './health';
+import { TONE_DOT, TONE_TEXT } from './tones';
 import { useToast } from './toast';
-import { Button } from './ui';
+import { Button, Card } from './ui';
 
 /** Semáforo de salud y diagnóstico de red: lo que se ve en el listado, el detalle del equipo y el Resumen. */
 
-type BandTone = (typeof BAND_META)[HealthBand]['tone'];
-
-const TONE_TEXT: Record<BandTone, string> = {
-  success: 'text-emerald-300',
-  warning: 'text-amber-300',
-  danger: 'text-rose-300',
-  neutral: 'text-zinc-500',
-};
-const TONE_DOT: Record<BandTone, string> = {
-  success: 'bg-emerald-400',
-  warning: 'bg-amber-400',
-  danger: 'bg-rose-400',
-  neutral: 'bg-zinc-600',
-};
 const TONE_PANEL: Record<'success' | 'warning' | 'danger', string> = {
-  success: 'border-emerald-500/25 bg-emerald-500/[0.07]',
-  warning: 'border-amber-500/25 bg-amber-500/[0.07]',
-  danger: 'border-rose-500/25 bg-rose-500/[0.07]',
+  success: 'border-ok bg-ok-soft',
+  warning: 'border-warn bg-warn-soft',
+  danger: 'border-danger bg-danger-soft',
 };
 
-const SECTION_TITLE = 'text-xs font-medium uppercase tracking-wider text-zinc-500';
+const SECTION_TITLE = 'text-xs font-semibold uppercase tracking-wider text-fg-4';
 
 function scoreLabel(s: HealthScore | undefined): string {
   if (!s || s.score === null) return 'Salud: sin datos';
@@ -94,7 +80,7 @@ function HealthGauge({ score }: { score: HealthScore }) {
   return (
     <div className="relative h-[76px] w-[76px] shrink-0" role="img" aria-label={scoreLabel(score)}>
       <svg viewBox="0 0 76 76" className="h-full w-full -rotate-90" aria-hidden>
-        <circle cx="38" cy="38" r={r} fill="none" strokeWidth="7" stroke="currentColor" className="text-white/10" />
+        <circle cx="38" cy="38" r={r} fill="none" strokeWidth="7" stroke="currentColor" className="text-track" />
         {score.score !== null && score.score > 0 && (
           <circle
             cx="38" cy="38" r={r} fill="none" strokeWidth="7" strokeLinecap="round" stroke="currentColor"
@@ -103,7 +89,7 @@ function HealthGauge({ score }: { score: HealthScore }) {
           />
         )}
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-xl font-semibold tabular-nums text-white" aria-hidden>
+      <span className="absolute inset-0 flex items-center justify-center text-xl font-semibold tabular-nums text-fg" aria-hidden>
         {score.score ?? '—'}
       </span>
     </div>
@@ -113,10 +99,10 @@ function HealthGauge({ score }: { score: HealthScore }) {
 function Metric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="flex items-start gap-2.5 py-2.5">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-fg-4" aria-hidden />
       <div className="min-w-0">
-        <dt className="text-[11px] text-zinc-500">{label}</dt>
-        <dd className={`text-sm ${value === '—' ? 'text-zinc-500' : 'text-zinc-200'}`}>{value}</dd>
+        <dt className="text-[11px] text-fg-4">{label}</dt>
+        <dd className={`text-sm ${value === '—' ? 'text-fg-4' : 'text-fg-2'}`}>{value}</dd>
       </div>
     </div>
   );
@@ -141,7 +127,7 @@ export function HealthSection({ device, score, inputs }: { device: Device; score
   return (
     <section aria-labelledby="salud-titulo">
       <h3 id="salud-titulo" className={`mb-2 ${SECTION_TITLE}`}>Salud</h3>
-      <div className="rounded-xl border border-white/[0.07]">
+      <div className="rounded-xl border border-line">
         <div className="flex items-center gap-4 px-4 py-4">
           <HealthGauge score={s} />
           <div className="min-w-0">
@@ -149,17 +135,17 @@ export function HealthSection({ device, score, inputs }: { device: Device; score
               <span className={`h-2.5 w-2.5 rounded-full ${TONE_DOT[meta.tone]}`} aria-hidden />
               {meta.label}
             </div>
-            <p className="mt-0.5 text-sm text-zinc-400">{SUMMARY[s.band]}</p>
+            <p className="mt-0.5 text-sm text-fg-3">{SUMMARY[s.band]}</p>
           </div>
         </div>
 
         {s.reasons.length > 0 && (
-          <div className="border-t border-white/[0.06] px-4 py-3">
-            <div className="mb-1.5 text-[11px] text-zinc-500">Qué le baja el puntaje</div>
+          <div className="border-t border-line px-4 py-3">
+            <div className="mb-1.5 text-[11px] text-fg-4">Qué le baja el puntaje</div>
             <ul className="flex flex-col gap-1.5">
               {s.reasons.map((r) => (
-                <li key={r.text} className="flex items-baseline gap-3 text-sm text-zinc-200">
-                  <span className={`w-8 shrink-0 text-right text-xs font-medium tabular-nums ${r.points >= 15 ? 'text-rose-300' : 'text-amber-300'}`}>
+                <li key={r.text} className="flex items-baseline gap-3 text-sm text-fg-2">
+                  <span className={`w-8 shrink-0 text-right text-xs font-medium tabular-nums ${r.points >= 15 ? 'text-danger' : 'text-warn'}`}>
                     <span aria-hidden>−{r.points}</span>
                     <span className="sr-only">resta {r.points} puntos:</span>
                   </span>
@@ -170,7 +156,7 @@ export function HealthSection({ device, score, inputs }: { device: Device; score
           </div>
         )}
 
-        <dl className="grid grid-cols-2 gap-x-4 border-t border-white/[0.06] px-4 py-1">
+        <dl className="grid grid-cols-2 gap-x-4 border-t border-line px-4 py-1">
           <Metric icon={Thermometer} label="Temperatura" value={formatTemp(h.temp_c)} />
           <Metric icon={Cpu} label="Memoria libre" value={h.low_mem === true && h.ram_avail_mb == null ? 'Poca' : formatFreeOf(h.ram_avail_mb, h.ram_total_mb)} />
           <Metric icon={HardDrive} label="Almacenamiento libre" value={formatFreeOf(h.free_mb, h.storage_mb)} />
@@ -186,7 +172,7 @@ export function HealthSection({ device, score, inputs }: { device: Device; score
         </dl>
 
         {partial && (
-          <p className="border-t border-white/[0.06] px-4 py-3 text-xs text-zinc-500">
+          <p className="border-t border-line px-4 py-3 text-xs text-fg-4">
             Este equipo no informa temperatura, memoria ni red (lo hacen los TV box con NEX TV para Android). El puntaje usa solo lo que se sabe.
           </p>
         )}
@@ -207,7 +193,7 @@ const SEGMENT_WORD: Record<SegmentState, string> = { ok: 'bien', falla: 'con pro
 function Hop({ state, failTone, from, to, caption }: { state: SegmentState; failTone: VerdictTone; from: string; to: string; caption: string }) {
   const tone: VerdictTone | 'neutral' = state === 'ok' ? 'success' : state === 'falla' ? failTone : 'neutral';
   const Icon = state === 'ok' ? CircleCheck : state === 'falla' ? VERDICT_ICON[failTone] : CircleHelp;
-  const line = tone === 'neutral' ? 'border-t-2 border-dashed border-white/15' : `h-0.5 rounded-full ${TONE_DOT[tone]}`;
+  const line = tone === 'neutral' ? 'border-t-2 border-dashed border-line-strong' : `h-0.5 rounded-full ${TONE_DOT[tone]}`;
   return (
     <li className="flex min-w-0 flex-1 flex-col items-center gap-1.5 pt-[11px]">
       <div className="flex w-full items-center gap-1">
@@ -216,7 +202,7 @@ function Hop({ state, failTone, from, to, caption }: { state: SegmentState; fail
         <span className={`flex-1 ${line}`} aria-hidden />
       </div>
       <span className="sr-only">Tramo de {from} a {to}: {SEGMENT_WORD[state]}.</span>
-      <span className={`px-1 text-center text-[11px] leading-tight ${state === 'falla' ? TONE_TEXT[tone] : 'text-zinc-500'}`}>{caption}</span>
+      <span className={`px-1 text-center text-[11px] leading-tight ${state === 'falla' ? TONE_TEXT[tone] : 'text-fg-4'}`}>{caption}</span>
     </li>
   );
 }
@@ -224,10 +210,10 @@ function Hop({ state, failTone, from, to, caption }: { state: SegmentState; fail
 function Node({ icon: Icon, label }: { icon: LucideIcon; label: ReactNode }) {
   return (
     <li className="flex w-14 shrink-0 flex-col items-center gap-1.5">
-      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.06] text-zinc-300 ring-1 ring-inset ring-white/10">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-fill-2 text-fg-2 ring-1 ring-inset ring-line">
         <Icon className="h-5 w-5" aria-hidden />
       </span>
-      <span className="text-center text-[11px] leading-tight text-zinc-400">{label}</span>
+      <span className="text-center text-[11px] leading-tight text-fg-3">{label}</span>
     </li>
   );
 }
@@ -276,16 +262,16 @@ function DiagResult({ diag, at, now, stale }: { diag: NetDiag; at: string | null
           <Icon className="h-4 w-4 shrink-0" aria-hidden />
           {meta.title}
         </div>
-        <p className="mt-1 text-sm text-zinc-300">{meta.text}</p>
+        <p className="mt-1 text-sm text-fg-2">{meta.text}</p>
         {reasons.length > 0 && (
-          <ul className="mt-2 flex list-disc flex-col gap-0.5 pl-5 text-sm text-zinc-300">
+          <ul className="mt-2 flex list-disc flex-col gap-0.5 pl-5 text-sm text-fg-2">
             {reasons.map((r) => <li key={r}>{r}</li>)}
           </ul>
         )}
       </div>
 
       {typeof diag.error === 'string' && diag.error && (
-        <p className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        <p className="flex items-start gap-2 rounded-lg bg-warn-soft px-3 py-2 text-xs text-warn">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           <span>El equipo no pudo completar toda la medición: <span className="break-words font-mono">{diag.error.slice(0, 160)}</span></span>
         </p>
@@ -293,15 +279,15 @@ function DiagResult({ diag, at, now, stale }: { diag: NetDiag; at: string | null
 
       <SegmentDiagram diag={diag} failTone={meta.tone} />
 
-      <dl className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] px-4">
+      <dl className="divide-y divide-line rounded-xl border border-line px-4">
         {rows.map(([label, value]) => (
           <div key={label} className="flex items-baseline justify-between gap-4 py-2">
-            <dt className="text-sm text-zinc-400">{label}</dt>
-            <dd className={`text-right text-sm tabular-nums ${value === '—' ? 'text-zinc-500' : 'text-zinc-200'}`}>{value}</dd>
+            <dt className="text-sm text-fg-3">{label}</dt>
+            <dd className={`text-right text-sm tabular-nums ${value === '—' ? 'text-fg-4' : 'text-fg-2'}`}>{value}</dd>
           </div>
         ))}
       </dl>
-      <p className="text-xs text-zinc-500" title={at ? new Date(at).toLocaleString('es-AR') : undefined}>
+      <p className="text-xs text-fg-4" title={at ? new Date(at).toLocaleString('es-AR') : undefined}>
         {stale ? 'Resultado anterior, medido' : 'Medido'} {relativeTime(at, now)}.
       </p>
     </div>
@@ -342,38 +328,38 @@ export function NetDiagSection({ device, now, onRefresh }: { device: Device; now
           {device.net_diag || state === 'sin-respuesta' ? 'Medir de nuevo' : 'Diagnosticar red'}
         </Button>
       </div>
-      <p className="mb-3 text-xs text-zinc-500">
+      <p className="mb-3 text-xs text-fg-4">
         Mide el Wi-Fi, el router y la salida a internet desde el TV box, para saber en qué tramo está el problema.
         Si la red da bien, la falla está en la app de TV o en su servidor.
       </p>
 
       <div className="flex flex-col gap-4" aria-live="polite">
         {pending && (
-          <div className="flex items-start gap-3 rounded-xl border border-indigo-500/25 bg-indigo-500/[0.07] px-4 py-3">
-            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-indigo-300" aria-hidden />
+          <div className="flex items-start gap-3 rounded-xl border border-accent bg-accent-soft px-4 py-3">
+            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-accent" aria-hidden />
             <div className="min-w-0 flex-1 text-sm">
-              <div className="font-medium text-indigo-200">
+              <div className="font-medium text-accent">
                 {online ? 'Midiendo la red del equipo…' : 'Esperando a que el equipo se conecte…'}
               </div>
-              <p className="mt-0.5 text-zinc-400">
+              <p className="mt-0.5 text-fg-3">
                 {!online
                   ? 'El equipo está sin conexión. Si vuelve dentro de la hora, mide y el resultado aparece acá.'
                   : waited > DIAG_SLOW_MS
                     ? 'Está tardando más de lo normal. Puede que el TV esté apagado o que su versión de NEX no incluya el diagnóstico.'
                     : 'Tarda 1 o 2 minutos. Esta pantalla se actualiza sola; podés seguir trabajando.'}
               </p>
-              <p className="mt-1 text-xs text-zinc-500">Pedido {relativeTime(device.diag_requested_at, now)}.</p>
+              <p className="mt-1 text-xs text-fg-4">Pedido {relativeTime(device.diag_requested_at, now)}.</p>
             </div>
             <Button size="sm" variant="ghost" icon={RefreshCw} onClick={onRefresh}>Actualizar</Button>
           </div>
         )}
 
         {state === 'sin-respuesta' && (
-          <div className="flex items-start gap-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] px-4 py-3 text-sm">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" aria-hidden />
+          <div className="flex items-start gap-3 rounded-xl border border-warn bg-warn-soft px-4 py-3 text-sm">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden />
             <div>
-              <div className="font-medium text-amber-200">El equipo no respondió al último pedido</div>
-              <p className="mt-0.5 text-zinc-400">
+              <div className="font-medium text-warn">El equipo no respondió al último pedido</div>
+              <p className="mt-0.5 text-fg-3">
                 Estuvo apagado o sin conexión durante la hora que dura el pedido, o su versión de NEX no incluye el diagnóstico.
                 {!online && ' Si el TV no se conecta, revisá en la casa que esté enchufado y con red.'}
               </p>
@@ -385,7 +371,7 @@ export function NetDiagSection({ device, now, onRefresh }: { device: Device; now
           <DiagResult diag={device.net_diag} at={device.net_diag_at} now={now} stale={state !== 'listo'} />
         ) : (
           state === 'nunca' && (
-            <p className="rounded-xl border border-dashed border-white/10 px-4 py-4 text-center text-sm text-zinc-500">
+            <p className="rounded-xl border border-dashed border-line px-4 py-4 text-center text-sm text-fg-4">
               Todavía no se midió la red de este equipo.
             </p>
           )
@@ -407,48 +393,45 @@ const BAND_HINT: Record<HealthBand, string> = {
 };
 
 /** Barra apilada + conteo por banda. Cada banda con equipos para mirar lleva al listado filtrado. */
-export function HealthSummary({ scores, onOpenLow }: { scores: Iterable<HealthScore>; onOpenLow: () => void }) {
+export function HealthSummary({ scores, onOpenLow, className = '' }: { scores: Iterable<HealthScore>; onOpenLow: () => void; className?: string }) {
   const counts = bandCounts(scores);
   const total = BAND_ORDER.reduce((n, b) => n + counts[b], 0);
   const low = counts.problemas + counts.atencion;
   if (total === 0) return null;
   const description = BAND_ORDER.filter((b) => counts[b] > 0).map((b) => `${counts[b]} ${BAND_META[b].label.toLowerCase()}`).join(', ');
   return (
-    <section aria-labelledby="salud-resumen" className="mb-6 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 sm:p-5">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h2 id="salud-resumen" className="flex items-center gap-2 text-[15px] font-semibold text-zinc-100">
-          <HeartPulse className="h-4 w-4 text-zinc-400" aria-hidden />
-          Salud de los equipos
-        </h2>
-        {low > 0 ? (
-          <Button size="sm" variant="secondary" onClick={onOpenLow}>
-            Ver {low} con salud baja
-          </Button>
+    <Card
+      title="Salud de los equipos"
+      description="Temperatura, memoria, red y reinicios"
+      className={className}
+      action={
+        low > 0 ? (
+          <Button size="sm" variant="secondary" onClick={onOpenLow}>Ver {low} con salud baja</Button>
         ) : (
-          <span className="flex items-center gap-1.5 text-xs text-emerald-300"><CircleCheck className="h-3.5 w-3.5" aria-hidden /> Ninguno con salud baja</span>
-        )}
-      </div>
-
-      <div className="mt-4 flex h-2 gap-0.5 overflow-hidden rounded-full" role="img" aria-label={`Salud de ${total} equipos: ${description}`}>
+          <span className="flex h-8 items-center gap-1.5 text-[13px] text-ok"><CircleCheck className="h-4 w-4" aria-hidden /> Ninguno con salud baja</span>
+        )
+      }
+    >
+      <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" role="img" aria-label={`Salud de ${total} equipos: ${description}`}>
         {BAND_ORDER.filter((b) => counts[b] > 0).map((b) => (
           <span key={b} className={`h-full min-w-[6px] ${TONE_DOT[BAND_META[b].tone]}`} style={{ flexGrow: counts[b], flexBasis: 0 }} />
         ))}
       </div>
 
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-        {BAND_ORDER.map((b, i) => (
-            <div key={b} className={i === 0 ? '' : 'sm:border-l sm:border-white/[0.06] sm:pl-4'}>
-              <dt className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <span className={`h-2 w-2 rounded-full ${TONE_DOT[BAND_META[b].tone]}`} aria-hidden />
-                {BAND_META[b].label}
-              </dt>
-              <dd className="mt-0.5 flex items-baseline gap-1.5">
-                <span className={`text-2xl font-semibold tabular-nums ${counts[b] > 0 && b !== 'sin-datos' ? TONE_TEXT[BAND_META[b].tone] : 'text-zinc-500'}`}>{counts[b]}</span>
-                <span className="text-[11px] text-zinc-500">{BAND_HINT[b]}</span>
-              </dd>
-            </div>
+      <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4">
+        {BAND_ORDER.map((b) => (
+          <div key={b}>
+            <dt className="flex items-center gap-1.5 text-[13px] text-fg-3">
+              <span className={`h-2 w-2 rounded-full ${TONE_DOT[BAND_META[b].tone]}`} aria-hidden />
+              {BAND_META[b].label}
+            </dt>
+            <dd className="mt-1 flex items-baseline gap-1.5">
+              <span className={`text-2xl font-semibold leading-7 tabular-nums ${counts[b] > 0 && b !== 'sin-datos' ? 'text-fg' : 'text-fg-4'}`}>{counts[b]}</span>
+              <span className="text-xs text-fg-4">{BAND_HINT[b]}</span>
+            </dd>
+          </div>
         ))}
       </dl>
-    </section>
+    </Card>
   );
 }

@@ -14,7 +14,7 @@ import {
   type Company,
 } from '../api';
 import { useToast } from '../toast';
-import { Button, Card, Chip, ErrorText, Field, inputClass, PageHeader } from '../ui';
+import { Button, Card, Chip, ErrorText, Field, inputClass, PageHeader, SaveBar } from '../ui';
 
 type Preview = 'manual' | 'payment' | 'home';
 
@@ -186,12 +186,12 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
         actions={<Button disabled={busy || !dirty || invalid} onClick={save}>{dirty ? 'Guardar cambios' : 'Guardado'}</Button>}
       />
       <ErrorText error={error} />
-      <div className="grid gap-6 xl:grid-cols-5">
-        <div className="flex flex-col gap-6 xl:col-span-3">
+      <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-5">
+        <div className="flex flex-col gap-4 lg:gap-5 xl:col-span-3">
           <Card title="Logo" description="Se ve en el arranque, el home y la pantalla de bloqueo.">
             <div className="flex flex-wrap items-center gap-5">
-              <div className="flex h-24 w-44 items-center justify-center rounded-xl border border-dashed border-white/15 bg-black/30">
-                {logo ? <img src={logo} alt="Logo" className="max-h-20 max-w-40 object-contain" /> : <span className="text-xs text-zinc-500">Sin logo</span>}
+              <div className="flex h-24 w-44 items-center justify-center rounded-xl border border-dashed border-line-strong bg-inset">
+                {logo ? <img src={logo} alt="Logo" className="max-h-20 max-w-40 object-contain" /> : <span className="text-xs text-fg-4">Sin logo</span>}
               </div>
               <div className="flex flex-col gap-2">
                 <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
@@ -199,7 +199,7 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
                   {logoPath ? 'Cambiar logo' : 'Subir logo'}
                 </Button>
                 {logoPath && <Button variant="ghost" size="sm" icon={Trash2} disabled={busy} onClick={removeLogo}>Quitar</Button>}
-                <span className="text-xs text-zinc-500">PNG, JPG o WEBP · máx. 1 MB · fondo transparente ideal</span>
+                <span className="text-xs text-fg-4">PNG, JPG o WEBP · máx. 1 MB · fondo transparente ideal</span>
               </div>
             </div>
           </Card>
@@ -218,20 +218,20 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
           </Card>
 
           <Card title="Reglas de cobro y conexión">
-            <div className="mb-5 flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-              <span className="whitespace-nowrap rounded-full bg-amber-500/10 px-3 py-1 text-amber-300">Aviso {form.payment_warning_days} días antes</span>
-              <span className="h-px w-6 shrink-0 bg-white/15" />
-              <span className="whitespace-nowrap rounded-full bg-white/[0.06] px-3 py-1 text-zinc-300">Vence el pago</span>
-              <span className="h-px w-6 shrink-0 bg-white/15" />
+            <div className="scroll-x -mx-4 mb-5 flex items-center gap-2 px-4 text-xs sm:-mx-5 sm:px-5" role="img" aria-label="Etapas del cobro, en orden">
+              <span className="whitespace-nowrap rounded-full bg-warn-soft px-3 py-1 text-warn">Aviso {form.payment_warning_days} días antes</span>
+              <span className="h-px w-6 shrink-0 bg-fill-3" />
+              <span className="whitespace-nowrap rounded-full bg-fill-2 px-3 py-1 text-fg-2">Vence el pago</span>
+              <span className="h-px w-6 shrink-0 bg-fill-3" />
               {restrictActive && (
                 <>
-                  <span className="whitespace-nowrap rounded-full bg-amber-500/10 px-3 py-1 text-amber-300">Restringido a los {restrictDays} días</span>
-                  <span className="h-px w-6 shrink-0 bg-white/15" />
+                  <span className="whitespace-nowrap rounded-full bg-warn-soft px-3 py-1 text-warn">Restringido a los {restrictDays} días</span>
+                  <span className="h-px w-6 shrink-0 bg-fill-3" />
                 </>
               )}
-              <span className="whitespace-nowrap rounded-full bg-white/[0.06] px-3 py-1 text-zinc-300">{form.payment_grace_days} días de gracia</span>
-              <span className="h-px w-6 shrink-0 bg-white/15" />
-              <span className="whitespace-nowrap rounded-full bg-rose-500/10 px-3 py-1 text-rose-300">Bloqueo automático</span>
+              <span className="whitespace-nowrap rounded-full bg-fill-2 px-3 py-1 text-fg-2">{form.payment_grace_days} días de gracia</span>
+              <span className="h-px w-6 shrink-0 bg-fill-3" />
+              <span className="whitespace-nowrap rounded-full bg-danger-soft px-3 py-1 text-danger">Bloqueo automático</span>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Aviso previo (días)" hint="Banner en el home del TV antes del vencimiento.">
@@ -246,9 +246,9 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
                 label="Restringir tras (días)"
                 hint={
                   restrictInvalid ? (
-                    <span className="text-rose-300">Entre 0 y 30, o vacío.</span>
+                    <span className="text-danger">Entre 0 y 30, o vacío.</span>
                   ) : restrictDays !== null && !restrictActive ? (
-                    <span className="text-amber-300">Sin efecto: tiene que ser menor que los días de gracia.</span>
+                    <span className="text-warn">Sin efecto: tiene que ser menor que los días de gracia.</span>
                   ) : (
                     'Tras el vencimiento: apps deshabilitadas, menú y red sí. Vacío = sin esta etapa.'
                   )
@@ -271,14 +271,14 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Teléfono de pago"
-                hint={phoneInvalid ? <span className="text-rose-300">5 a 32 caracteres: números, espacios, + ( ) -</span> : 'Opcional.'}
+                hint={phoneInvalid ? <span className="text-danger">5 a 32 caracteres: números, espacios, + ( ) -</span> : 'Opcional.'}
               >
                 <input type="tel" className={inputClass} maxLength={32} placeholder="0800-555-1234" value={form.payment_phone}
                   onFocus={() => setPreview('payment')} onChange={(e) => set('payment_phone', e.target.value)} />
               </Field>
               <Field
                 label="URL de pago"
-                hint={urlInvalid ? <span className="text-rose-300">https://, hasta 300 caracteres, sin espacios ni comillas</span> : 'Opcional. El TV la muestra como QR.'}
+                hint={urlInvalid ? <span className="text-danger">https://, hasta 300 caracteres, sin espacios ni comillas</span> : 'Opcional. El TV la muestra como QR.'}
               >
                 <input type="url" className={inputClass} maxLength={PAYMENT_URL_MAX} placeholder="https://pagos.tu-isp.com" value={form.payment_url}
                   onFocus={() => setPreview('payment')} onChange={(e) => set('payment_url', e.target.value)} />
@@ -288,7 +288,7 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
         </div>
 
         <div className="xl:col-span-2">
-          <div className="sticky top-6">
+          <div className="xl:sticky xl:top-6">
             <Card
               title="Vista previa en el TV"
               action={
@@ -300,11 +300,12 @@ export default function BrandPage({ company, onChanged }: { company: Company; on
               }
             >
               <TvPreview company={live} logo={logo} mode={preview} />
-              <p className="mt-4 text-center text-xs text-zinc-500">Se actualiza mientras escribís.</p>
+              <p className="mt-4 text-center text-xs text-fg-4">Se actualiza mientras escribís.</p>
             </Card>
           </div>
         </div>
       </div>
+      <SaveBar show={dirty} busy={busy} disabled={invalid} onSave={save} hint={invalid ? 'Revisá los campos marcados en rojo' : undefined} />
     </>
   );
 }

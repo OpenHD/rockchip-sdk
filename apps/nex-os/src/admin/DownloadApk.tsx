@@ -21,12 +21,12 @@ export default function DownloadApk() {
     <a
       href={APK_PATH}
       download="nex-tv.apk"
-      className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] px-3 py-2.5 text-sm text-zinc-300 transition hover:bg-white/[0.04] hover:text-white"
+      className="flex items-center gap-2.5 rounded-lg border border-line px-2.5 py-2 text-sm text-fg-2 transition hover:border-line-strong hover:bg-fill hover:text-fg"
     >
-      <Download className="h-4 w-4" aria-hidden />
+      <Download className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
       <span className="min-w-0">
         <span className="block font-medium">Descargar NEX TV</span>
-        <span className="block text-[11px] text-zinc-500">APK para TV box Android</span>
+        <span className="block text-[11px] text-fg-4">APK para TV box Android</span>
       </span>
     </a>
   );

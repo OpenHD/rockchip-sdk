@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Bell,
+  ChevronRight,
   CircleCheck,
   Clock,
   CreditCard,
@@ -13,15 +14,18 @@ import {
   ShieldAlert,
   Skull,
   TriangleAlert,
+  Tv,
   Wifi,
   WifiOff,
   type LucideIcon,
 } from 'lucide-react';
-import { deviceStatus, enforcement, EVENT_LABELS, isOnline, type Company, type DeviceEvent } from '../api';
+import { deviceStatus, enforcement, EVENT_LABELS, isOnline, type Company, type DeviceEvent, type DeviceStatus } from '../api';
 import { HealthSummary } from '../DeviceHealth';
-import { healthIssues } from '../deviceMeta';
+import { statusBreakdown } from '../deviceList';
+import { healthIssues, STATUS_META, type Filter } from '../deviceMeta';
 import { relativeTime } from '../format';
-import { Button, Card, Chip, EmptyState, ErrorText, PageHeader, Skeleton } from '../ui';
+import { TONE_DOT, type Tone } from '../tones';
+import { Button, Card, EmptyState, ErrorState, ErrorText, PageHeader, Segmented, Skeleton } from '../ui';
 import type { CompanyData } from '../useCompanyData';
 
 const EVENT_ICON: Record<string, LucideIcon> = {
@@ -42,9 +46,18 @@ const EVENT_ICON: Record<string, LucideIcon> = {
 };
 
 const SEVERITY_RING: Record<DeviceEvent['severity'], string> = {
-  critical: 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
-  warning: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
-  info: 'bg-white/[0.06] text-zinc-400 ring-white/10',
+  critical: 'bg-danger-soft text-danger ring-danger',
+  warning: 'bg-warn-soft text-warn ring-warn',
+  info: 'bg-fill-2 text-fg-3 ring-line',
+};
+
+/** Filtro del listado de equipos al que lleva cada estado. "Activo" no tiene filtro propio. */
+const STATUS_FILTER: Partial<Record<DeviceStatus, Filter>> = {
+  bloqueado: 'bloqueados',
+  'pago vencido': 'vencidos',
+  restringido: 'restringidos',
+  'por vencer': 'por-vencer',
+  'sin conexión': 'offline',
 };
 
 interface Attention {
@@ -56,50 +69,94 @@ interface Attention {
   icon: LucideIcon;
 }
 
-function Kpi({
-  label,
-  value,
-  total,
-  icon: Icon,
-  tone,
-  onClick,
-}: {
-  label: string;
-  value: number | string;
-  total?: number;
-  icon: LucideIcon;
-  tone: 'indigo' | 'emerald' | 'rose' | 'amber' | 'zinc';
-  onClick?: () => void;
-}) {
-  const tones = {
-    indigo: 'text-indigo-300 bg-indigo-500/10',
-    emerald: 'text-emerald-300 bg-emerald-500/10',
-    rose: 'text-rose-300 bg-rose-500/10',
-    amber: 'text-amber-300 bg-amber-500/10',
-    zinc: 'text-zinc-300 bg-white/[0.06]',
-  };
-  const pct = total ? Math.round((Number(value) / total) * 100) : null;
+const KPI_TONE: Record<Tone, string> = {
+  neutral: 'bg-fill-2 text-fg-3',
+  success: 'bg-ok-soft text-ok',
+  warning: 'bg-warn-soft text-warn',
+  danger: 'bg-danger-soft text-danger',
+  info: 'bg-accent-soft text-accent',
+};
+
+/** Número grande que lleva al listado ya filtrado. En cero queda apagado: solo llama la atención lo que hay que mirar. */
+function Kpi({ label, value, hint, icon: Icon, tone, onClick }: { label: string; value: number; hint: string; icon: LucideIcon; tone: Tone; onClick: () => void }) {
+  const active = value > 0;
   return (
     <button
+      type="button"
       onClick={onClick}
-      className="group flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 text-left transition hover:border-white/15 hover:bg-white/[0.04]"
+      aria-label={`${label}: ${value}. ${hint}. Ver en Equipos`}
+      className="group flex min-w-0 flex-col gap-3 rounded-xl border border-line bg-surface p-4 text-left shadow-card transition hover:border-line-strong hover:bg-surface-2"
     >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-zinc-400">{label}</span>
-        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${tones[tone]}`}>
+      <div className="flex w-full items-center justify-between gap-2">
+        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${KPI_TONE[active ? tone : 'neutral']}`}>
           <Icon className="h-4 w-4" aria-hidden />
         </span>
+        <ChevronRight className="h-4 w-4 text-fg-4 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-3xl font-semibold tabular-nums tracking-tight text-white">{value}</span>
-        {total !== undefined && <span className="text-sm text-zinc-500">/ {total}</span>}
+      <div className="min-w-0">
+        <div className={`text-[28px] font-semibold leading-8 tabular-nums tracking-tight ${active ? 'text-fg' : 'text-fg-4'}`}>{value}</div>
+        <div className="mt-1 truncate text-[13px] font-medium text-fg-2">{label}</div>
+        <div className="truncate text-xs text-fg-4">{hint}</div>
       </div>
-      {pct !== null && (
-        <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-          <div className="h-full rounded-full bg-emerald-400/80 transition-all" style={{ width: `${pct}%` }} />
-        </div>
-      )}
     </button>
+  );
+}
+
+/** El parque de un vistazo: cuántos están en línea y cómo se reparten por estado. */
+function FleetCard({ company, devices, online, goDevices }: { company: Company; devices: CompanyData['devices'] & object; online: number; goDevices: (filter: string) => void }) {
+  const breakdown = useMemo(() => statusBreakdown(devices, company), [devices, company]);
+  const total = devices.length;
+  const pct = total ? Math.round((online / total) * 100) : 0;
+  const description = breakdown.map((b) => `${b.count} ${STATUS_META[b.status].label.toLowerCase()}`).join(', ');
+  return (
+    <Card
+      title="Equipos"
+      description={`${total} ${total === 1 ? 'vinculado' : 'vinculados'} a ${company.name}`}
+      action={<Button size="sm" variant="secondary" onClick={() => goDevices('todos')}>Ver todos</Button>}
+      className="xl:col-span-3"
+    >
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div className="flex items-baseline gap-2">
+          <span className="text-4xl font-semibold leading-none tabular-nums tracking-tight text-fg">{online}</span>
+          <span className="text-sm text-fg-3">de {total} en línea</span>
+        </div>
+        <button type="button" onClick={() => goDevices('offline')} className="rounded-md text-[13px] text-fg-3 underline-offset-4 transition hover:text-fg hover:underline">
+          {total - online === 0 ? 'Ninguno sin conexión' : `${total - online} sin conexión ahora`}
+        </button>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-fill-2" role="img" aria-label={`${pct}% de los equipos en línea`}>
+        <div className="h-full rounded-full bg-ok transition-all" style={{ width: `${pct}%` }} />
+      </div>
+
+      <div className="mt-6 text-xs font-semibold uppercase tracking-wider text-fg-4">Estado del servicio</div>
+      <div className="mt-2 flex h-2.5 gap-0.5 overflow-hidden rounded-full" role="img" aria-label={`Estado de ${total} equipos: ${description}`}>
+        {breakdown.map((b) => (
+          <span key={b.status} className={`h-full min-w-[6px] ${TONE_DOT[STATUS_META[b.status].tone]}`} style={{ flexGrow: b.count, flexBasis: 0 }} />
+        ))}
+      </div>
+      <ul className="mt-3 flex flex-wrap gap-x-1 gap-y-1">
+        {breakdown.map((b) => {
+          const meta = STATUS_META[b.status];
+          const filter = STATUS_FILTER[b.status];
+          const content = (
+            <>
+              <span className={`h-2 w-2 shrink-0 rounded-full ${TONE_DOT[meta.tone]}`} aria-hidden />
+              <span className="text-fg-3">{meta.label}</span>
+              <span className="font-semibold tabular-nums text-fg">{b.count}</span>
+            </>
+          );
+          return (
+            <li key={b.status}>
+              {filter ? (
+                <button type="button" onClick={() => goDevices(filter)} className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] transition hover:bg-fill-2">{content}</button>
+              ) : (
+                <span className="flex h-8 items-center gap-1.5 px-2 text-[13px]">{content}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }
 
@@ -157,6 +214,7 @@ export default function OverviewPage({
   }, [devices, company, data.health]);
 
   const events = onlyAlerts ? data.events.filter((e) => e.severity !== 'info') : data.events;
+  const ATTENTION_MAX = 8;
 
   return (
     <>
@@ -169,95 +227,138 @@ export default function OverviewPage({
         }
         actions={<Button variant="secondary" icon={RefreshCw} onClick={data.reload}>Actualizar</Button>}
       />
-      <ErrorText error={data.error} />
+      {data.devices && <ErrorText error={data.error} />}
 
       {!data.devices ? (
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
-          {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-32" />)}
-        </div>
+        data.error ? (
+          <Card><ErrorState title="No pudimos cargar el resumen" error={data.error} onRetry={data.reload} /></Card>
+        ) : (
+          <div className="flex flex-col gap-4" role="status" aria-label="Cargando el resumen">
+            <div className="grid gap-4 xl:grid-cols-5">
+              <Skeleton className="h-56 xl:col-span-3" />
+              <Skeleton className="h-56 xl:col-span-2" />
+            </div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-32" />)}
+            </div>
+          </div>
+        )
+      ) : devices.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Tv}
+            title="Todavía no hay equipos"
+            action={<Button onClick={() => goDevices('todos')}>Ir a Equipos para vincular el primero</Button>}
+          >
+            Encendé un TV box con NEX: muestra un código y un QR. Cuando lo vincules, acá vas a ver cuántos están en línea,
+            los pagos por vencer y las alertas.
+          </EmptyState>
+        </Card>
       ) : (
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <Kpi label="En línea" value={stats.online} total={devices.length} icon={Wifi} tone="emerald" onClick={() => goDevices('online')} />
-          <Kpi label="Bloqueados" value={stats.locked} icon={Lock} tone="zinc" onClick={() => goDevices('bloqueados')} />
-          <Kpi label="Pagos vencidos" value={stats.overdue} icon={CreditCard} tone={stats.overdue ? 'rose' : 'zinc'} onClick={() => goDevices('vencidos')} />
-          <Kpi label="Por vencer" value={stats.dueSoon} icon={Clock} tone={stats.dueSoon ? 'amber' : 'zinc'} onClick={() => goDevices('por-vencer')} />
-          <Kpi label="Alertas de seguridad" value={stats.security} icon={ShieldAlert} tone={stats.security ? 'rose' : 'zinc'} onClick={() => goDevices('alertas')} />
+        <div className="flex flex-col gap-4 lg:gap-5">
+          <div className="grid gap-4 lg:gap-5 xl:grid-cols-5">
+            <FleetCard company={company} devices={devices} online={stats.online} goDevices={goDevices} />
+            <HealthSummary scores={data.health.values()} onOpenLow={() => goDevices('salud-baja')} className="xl:col-span-2" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-5">
+            <Kpi label="Bloqueados" hint="Confirmado por el TV" value={stats.locked} icon={Lock} tone="danger" onClick={() => goDevices('bloqueados')} />
+            <Kpi label="Pagos vencidos" hint="Pasaron los días de gracia" value={stats.overdue} icon={CreditCard} tone="danger" onClick={() => goDevices('vencidos')} />
+            <Kpi label="Por vencer" hint={`Vencen en ${company.payment_warning_days} días o menos`} value={stats.dueSoon} icon={Clock} tone="warning" onClick={() => goDevices('por-vencer')} />
+            <Kpi label="Alertas de seguridad" hint="Equipos para revisar" value={stats.security} icon={ShieldAlert} tone="danger" onClick={() => goDevices('alertas')} />
+          </div>
+
+          <div className="grid gap-4 lg:gap-5 xl:grid-cols-5">
+            <Card
+              title="Requiere atención"
+              description={attention.length ? `${attention.length} ${attention.length === 1 ? 'tema' : 'temas'}, lo más grave primero` : 'Lo más grave primero'}
+              className="xl:col-span-2"
+              padded={false}
+            >
+              {attention.length === 0 ? (
+                <EmptyState icon={CircleCheck} title="Todo en orden">No hay equipos con problemas.</EmptyState>
+              ) : (
+                <>
+                  <ul className="divide-y divide-line">
+                    {attention.slice(0, ATTENTION_MAX).map((a) => (
+                      <li key={a.id}>
+                        <button type="button" onClick={() => openDevice(a.deviceId)} className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-fill sm:px-5">
+                          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${a.tone === 'danger' ? SEVERITY_RING.critical : SEVERITY_RING.warning}`}>
+                            <a.icon className="h-4 w-4" aria-hidden />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-fg">{a.title}</span>
+                            <span className="block truncate text-xs text-fg-4">{a.detail}</span>
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-fg-4 transition group-hover:translate-x-0.5 group-hover:text-fg-2" aria-hidden />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  {attention.length > ATTENTION_MAX && (
+                    <div className="border-t border-line px-4 py-2.5 sm:px-5">
+                      <Button size="sm" variant="ghost" className="-ml-2" onClick={() => goDevices('alertas')}>
+                        Y {attention.length - ATTENTION_MAX} más: ver equipos con alertas
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </Card>
+
+            <Card
+              title="Actividad"
+              description="Últimos 7 días"
+              className="xl:col-span-3"
+              action={
+                <Segmented
+                  label="Qué actividad mostrar"
+                  value={onlyAlerts ? 'alertas' : 'todo'}
+                  onChange={(v) => setOnlyAlerts(v === 'alertas')}
+                  options={[{ id: 'alertas', label: 'Alertas' }, { id: 'todo', label: 'Todo' }]}
+                />
+              }
+            >
+              {events.length === 0 ? (
+                <EmptyState icon={Bell} title={onlyAlerts && data.events.length > 0 ? 'Sin alertas' : 'Sin actividad'}>
+                  {onlyAlerts && data.events.length > 0 ? 'No hubo alertas en los últimos 7 días. Mirá "Todo" para ver el resto.' : 'Los eventos de los equipos aparecen acá.'}
+                </EmptyState>
+              ) : (
+                <ol className="flex flex-col">
+                  {events.slice(0, 40).map((e, i) => {
+                    const Icon = EVENT_ICON[e.kind] ?? Bell;
+                    return (
+                      <li key={e.id} className="relative flex gap-3 pb-4 last:pb-0">
+                        {i < Math.min(events.length, 40) - 1 && <span className="absolute left-4 top-9 h-[calc(100%-2.25rem)] w-px bg-fill-2" aria-hidden />}
+                        <span className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${SEVERITY_RING[e.severity]}`}>
+                          <Icon className="h-4 w-4" aria-hidden />
+                        </span>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                            <span className="text-sm font-medium text-fg">{EVENT_LABELS[e.kind] ?? e.kind}</span>
+                            <span className="text-xs text-fg-4" title={new Date(e.created_at).toLocaleString('es-AR')}>{relativeTime(e.created_at)}</span>
+                          </div>
+                          <div className="text-[13px] text-fg-4">
+                            {e.device_id ? (
+                              <button type="button" className="rounded text-fg-2 underline-offset-2 hover:text-accent hover:underline" onClick={() => openDevice(e.device_id!)}>
+                                {names.get(e.device_id) ?? e.device_id.slice(0, 8)}
+                              </button>
+                            ) : (
+                              company.name
+                            )}
+                            {typeof e.details.domain === 'string' && <> · <span className="font-mono text-xs">{e.details.domain}</span></>}
+                            {typeof e.details.lock_kind === 'string' && e.details.lock_kind && <> · motivo: {e.details.lock_kind}</>}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </Card>
+          </div>
         </div>
       )}
-
-      {data.devices && devices.length > 0 && <HealthSummary scores={data.health.values()} onOpenLow={() => goDevices('salud-baja')} />}
-
-      <div className="grid gap-6 xl:grid-cols-5">
-        <Card title="Requiere atención" description="Ordenado por prioridad" className="xl:col-span-2" padded={false}>
-          {attention.length === 0 ? (
-            <EmptyState icon={CircleCheck} title="Todo en orden">No hay equipos con problemas.</EmptyState>
-          ) : (
-            <ul className="divide-y divide-white/[0.05] pb-2">
-              {attention.slice(0, 12).map((a) => (
-                <li key={a.id}>
-                  <button onClick={() => openDevice(a.deviceId)} className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-white/[0.03]">
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${a.tone === 'danger' ? SEVERITY_RING.critical : SEVERITY_RING.warning}`}>
-                      <a.icon className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-zinc-100">{a.title}</span>
-                      <span className="block truncate text-xs text-zinc-500">{a.detail}</span>
-                    </span>
-                    <span className="text-xs text-indigo-300">Ver</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card
-          title="Actividad"
-          description="Últimos 7 días"
-          className="xl:col-span-3"
-          action={
-            <div className="flex gap-1.5">
-              <Chip active={onlyAlerts} onClick={() => setOnlyAlerts(true)}>Alertas</Chip>
-              <Chip active={!onlyAlerts} onClick={() => setOnlyAlerts(false)}>Todo</Chip>
-            </div>
-          }
-        >
-          {events.length === 0 ? (
-            <EmptyState icon={Bell} title="Sin actividad">Los eventos de los equipos aparecen acá.</EmptyState>
-          ) : (
-            <ol className="flex flex-col">
-              {events.slice(0, 40).map((e, i) => {
-                const Icon = EVENT_ICON[e.kind] ?? Bell;
-                return (
-                  <li key={e.id} className="relative flex gap-3 pb-4">
-                    {i < Math.min(events.length, 40) - 1 && <span className="absolute left-4 top-9 h-[calc(100%-2rem)] w-px bg-white/[0.07]" />}
-                    <span className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${SEVERITY_RING[e.severity]}`}>
-                      <Icon className="h-4 w-4" aria-hidden />
-                    </span>
-                    <div className="min-w-0 flex-1 pt-0.5">
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                        <span className="text-sm font-medium text-zinc-100">{EVENT_LABELS[e.kind] ?? e.kind}</span>
-                        <span className="text-xs text-zinc-500" title={new Date(e.created_at).toLocaleString('es-AR')}>{relativeTime(e.created_at)}</span>
-                      </div>
-                      <div className="text-xs text-zinc-500">
-                        {e.device_id ? (
-                          <button className="text-zinc-300 hover:text-indigo-300 hover:underline" onClick={() => openDevice(e.device_id!)}>
-                            {names.get(e.device_id) ?? e.device_id.slice(0, 8)}
-                          </button>
-                        ) : (
-                          company.name
-                        )}
-                        {typeof e.details.domain === 'string' && <> · <span className="font-mono">{e.details.domain}</span></>}
-                        {typeof e.details.lock_kind === 'string' && e.details.lock_kind && <> · motivo: {e.details.lock_kind}</>}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-        </Card>
-      </div>
     </>
   );
 }

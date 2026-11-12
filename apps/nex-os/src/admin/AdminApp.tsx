@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import {
   AppWindow,
   Bell,
   Building2,
-  ChevronDown,
+  Check,
+  ChevronsUpDown,
   Cpu,
+  Ellipsis,
+  Eye,
+  EyeOff,
   KeyRound,
   LayoutDashboard,
+  LoaderCircle,
   LogOut,
+  MailCheck,
   Megaphone,
   Menu as MenuIcon,
   MonitorX,
@@ -30,6 +36,8 @@ import Turnstile from './Turnstile';
 import { db, run, type Company } from './api';
 import { FILTERS } from './deviceMeta';
 import DownloadApk from './DownloadApk';
+import { initials } from './format';
+import { useLayer } from './layer';
 import ThemeToggle from './ThemeToggle';
 import AlertsPage from './pages/Alerts';
 import AppsPage from './pages/Apps';
@@ -39,8 +47,8 @@ import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/N
 import NoticesPage from './pages/Notices';
 import OverviewPage from './pages/Overview';
 import { ApiKeysPage, AuditPage, MembersPage } from './pages/Team';
-import { takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
-import { Button, ErrorText, Field, inputClass, Menu, Skeleton, ToastProvider } from './ui';
+import { formatRoute, takeClaimParam, useRoute, type CompanySection, type NexSection, type Route } from './routing';
+import { Button, Callout, EmptyState, ErrorState, ErrorText, Field, IconButton, inputClass, Menu, SearchInput, Skeleton, ToastProvider } from './ui';
 import { useCompanyData } from './useCompanyData';
 
 const initialClaim = takeClaimParam();
@@ -87,15 +95,15 @@ function useAuthStage() {
 }
 
 function Logo({ size = 'md' }: { size?: 'md' | 'lg' }) {
-  const box = size === 'lg' ? 'h-11 w-11 rounded-2xl' : 'h-8 w-8 rounded-xl';
+  const box = size === 'lg' ? 'h-11 w-11 rounded-xl' : 'h-8 w-8 rounded-lg';
   return (
     <div className="flex items-center gap-2.5">
-      <div className={`flex items-center justify-center bg-gradient-to-br from-indigo-400 to-violet-600 text-white shadow-lg shadow-indigo-500/30 ${box}`}>
+      <div className={`flex shrink-0 items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm ${box}`}>
         <Tv className={size === 'lg' ? 'h-5 w-5' : 'h-4 w-4'} aria-hidden />
       </div>
       <div className="leading-tight">
-        <div className={`font-semibold tracking-tight text-white ${size === 'lg' ? 'text-lg' : 'text-sm'}`}>NEX MDM</div>
-        <div className="text-[11px] text-zinc-500">Gestión de TV box</div>
+        <div className={`font-semibold tracking-tight text-fg ${size === 'lg' ? 'text-lg' : 'text-sm'}`}>NEX MDM</div>
+        <div className="text-[11px] text-fg-4">Gestión de TV box</div>
       </div>
     </div>
   );
@@ -103,31 +111,32 @@ function Logo({ size = 'md' }: { size?: 'md' | 'lg' }) {
 
 function AuthLayout({ title, subtitle, step, children }: { title: string; subtitle: string; step?: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 flex justify-center"><Logo size="lg" /></div>
-        <div className="rounded-2xl border border-white/[0.08] bg-[#11131b]/90 p-6 shadow-2xl shadow-black/40 backdrop-blur">
-          {step && <div className="mb-3 text-[11px] font-medium uppercase tracking-wider text-indigo-300">{step}</div>}
-          <h1 className="text-xl font-semibold text-white">{title}</h1>
-          <p className="mb-6 mt-1 text-sm text-zinc-400">{subtitle}</p>
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4 py-10">
+      <main className="w-full max-w-[400px]">
+        <div className="mb-7 flex justify-center"><Logo size="lg" /></div>
+        <div className="rounded-2xl border border-line bg-surface p-6 shadow-pop sm:p-7">
+          {step && <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-accent">{step}</div>}
+          <h1 className="text-xl font-semibold tracking-tight text-fg">{title}</h1>
+          <p className="mb-6 mt-1 text-sm leading-relaxed text-fg-3">{subtitle}</p>
           {children}
         </div>
-        <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-zinc-600">
+        <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-fg-4">
           <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Acceso protegido con segundo factor
         </p>
-        <ThemeToggle className="mx-auto mt-4 w-fit" />
-      </div>
+        <div className="mt-4 flex justify-center"><ThemeToggle /></div>
+      </main>
     </div>
   );
 }
 
-function SignIn() {
+export function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'in' | 'up'>('in');
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [failures, setFailures] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
   const [now, setNow] = useState(0);
@@ -186,6 +195,7 @@ function SignIn() {
     } finally {
       setBusy(false);
       setPassword('');
+      setShowPassword(false);
       if (TURNSTILE_SITE_KEY) setCaptchaReset((k) => k + 1);
     }
   };
@@ -197,24 +207,36 @@ function SignIn() {
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Field label="Email">
-          <input className={inputClass} type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className={inputClass} type="email" inputMode="email" autoCapitalize="none" spellCheck={false} autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
         <Field label="Contraseña" hint={mode === 'up' ? 'Mínimo 12 caracteres' : undefined}>
-          <input className={inputClass} type="password" required minLength={mode === 'up' ? 12 : undefined}
-            autoComplete={mode === 'in' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} />
+          <span className="relative">
+            <input className={`${inputClass} pr-11`} type={showPassword ? 'text' : 'password'} required minLength={mode === 'up' ? 12 : undefined}
+              autoComplete={mode === 'in' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} />
+            <button
+              type="button"
+              aria-pressed={showPassword}
+              aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-fg-4 transition hover:bg-fill-2 hover:text-fg"
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+            </button>
+          </span>
         </Field>
         {TURNSTILE_SITE_KEY && <Turnstile onToken={onCaptcha} resetKey={captchaReset} />}
         <ErrorText error={error} />
-        {info && <p className="rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{info}</p>}
-        <Button type="submit" disabled={busy || wait > 0} className="h-10">
+        {info && <Callout tone="success" icon={MailCheck}>{info}</Callout>}
+        <Button type="submit" loading={busy} disabled={wait > 0} className="h-11">
           {wait > 0 ? `Esperá ${wait} s` : mode === 'in' ? 'Ingresar' : 'Crear cuenta'}
         </Button>
         {SIGNUP_ENABLED ? (
-          <button type="button" className="text-sm text-zinc-400 transition hover:text-white" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
+          <button type="button" className="rounded-md py-1 text-sm text-fg-3 transition hover:text-fg" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
             {mode === 'in' ? '¿No tenés cuenta? Crear una' : 'Ya tengo cuenta'}
           </button>
         ) : (
-          <p className="text-center text-xs text-zinc-500">¿Sin cuenta? Pedile a NEX o al dueño de tu empresa que te invite.</p>
+          <p className="text-center text-xs leading-relaxed text-fg-4">¿Sin cuenta? Pedile a NEX o al dueño de tu empresa que te invite.</p>
         )}
       </form>
     </AuthLayout>
@@ -225,6 +247,7 @@ function CodeInput({ value, onChange }: { value: string; onChange: (v: string) =
   return (
     <input
       className={`${inputClass} h-14 text-center font-mono text-2xl tracking-[0.5em]`}
+      aria-label="Código de 6 dígitos"
       inputMode="numeric"
       autoComplete="one-time-code"
       autoFocus
@@ -236,7 +259,7 @@ function CodeInput({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-function MfaEnroll({ onDone }: { onDone: () => void }) {
+export function MfaEnroll({ onDone }: { onDone: () => void }) {
   const [factor, setFactor] = useState<{ id: string; qr: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -265,20 +288,20 @@ function MfaEnroll({ onDone }: { onDone: () => void }) {
   return (
     <AuthLayout step="Paso 2 de 2" title="Activá el segundo factor" subtitle="Bloquear equipos de clientes es una acción crítica: el segundo factor es obligatorio.">
       <div className="mb-5 flex flex-col items-center gap-3">
-        {factor ? <img src={factor.qr} alt="Código QR para la app de autenticación" className="h-44 w-44 rounded-xl bg-white p-2" /> : <Skeleton className="h-44 w-44" />}
-        <p className="text-center text-xs text-zinc-500">Escaneá con Google Authenticator, 1Password o Authy.</p>
-        {factor && <code className="break-all rounded bg-white/[0.05] px-2 py-1 text-[11px] text-zinc-400">{factor.secret}</code>}
+        {factor ? <img src={factor.qr} alt="Código QR para la app de autenticación" className="h-44 w-44 rounded-xl border border-line bg-white p-2" /> : <Skeleton className="h-44 w-44" />}
+        <p className="text-center text-xs text-fg-4">Escaneá con Google Authenticator, 1Password o Authy.</p>
+        {factor && <code className="select-all break-all rounded-md bg-fill-2 px-2 py-1 font-mono text-[11px] text-fg-3">{factor.secret}</code>}
       </div>
       <form onSubmit={verify} className="flex flex-col gap-3">
         <CodeInput value={code} onChange={setCode} />
         <ErrorText error={error} />
-        <Button type="submit" disabled={!factor || code.length !== 6} className="h-10">Verificar y entrar</Button>
+        <Button type="submit" disabled={!factor || code.length !== 6} className="h-11">Verificar y entrar</Button>
       </form>
     </AuthLayout>
   );
 }
 
-function MfaVerify({ onDone }: { onDone: () => void }) {
+export function MfaVerify({ onDone }: { onDone: () => void }) {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const verify = async (e: FormEvent) => {
@@ -296,7 +319,7 @@ function MfaVerify({ onDone }: { onDone: () => void }) {
       <form onSubmit={verify} className="flex flex-col gap-3">
         <CodeInput value={code} onChange={setCode} />
         <ErrorText error={error} />
-        <Button type="submit" icon={KeyRound} disabled={code.length !== 6} className="h-10">Verificar</Button>
+        <Button type="submit" icon={KeyRound} disabled={code.length !== 6} className="h-11">Verificar</Button>
       </form>
     </AuthLayout>
   );
@@ -306,65 +329,176 @@ function MfaVerify({ onDone }: { onDone: () => void }) {
 // Armazón
 // ---------------------------------------------------------------------------
 
-const COMPANY_NAV: { id: CompanySection; label: string; icon: LucideIcon }[] = [
-  { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
-  { id: 'equipos', label: 'Equipos', icon: Tv },
-  { id: 'apps', label: 'Apps', icon: AppWindow },
-  { id: 'marca', label: 'Marca y cobro', icon: Palette },
-  { id: 'avisos', label: 'Avisos', icon: Bell },
-  { id: 'comunicados', label: 'Comunicados', icon: Megaphone },
-  { id: 'miembros', label: 'Miembros', icon: Users },
-  { id: 'api', label: 'API', icon: Plug },
-  { id: 'auditoria', label: 'Auditoría', icon: ScrollText },
+interface NavItem<T> {
+  id: T;
+  label: string;
+  icon: LucideIcon;
+}
+
+/** Navegación de la empresa, agrupada por lo que se viene a hacer. */
+const COMPANY_NAV: { group: string; items: NavItem<CompanySection>[] }[] = [
+  {
+    group: 'Operación',
+    items: [
+      { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
+      { id: 'equipos', label: 'Equipos', icon: Tv },
+      { id: 'comunicados', label: 'Comunicados', icon: Megaphone },
+    ],
+  },
+  {
+    group: 'Configuración',
+    items: [
+      { id: 'apps', label: 'Apps', icon: AppWindow },
+      { id: 'marca', label: 'Marca y cobro', icon: Palette },
+      { id: 'avisos', label: 'Avisos', icon: Bell },
+    ],
+  },
+  {
+    group: 'Acceso',
+    items: [
+      { id: 'miembros', label: 'Miembros', icon: Users },
+      { id: 'api', label: 'API', icon: Plug },
+      { id: 'auditoria', label: 'Auditoría', icon: ScrollText },
+    ],
+  },
 ];
 
-const NEX_NAV: { id: NexSection; label: string; icon: LucideIcon }[] = [
+const NEX_NAV: NavItem<NexSection>[] = [
   { id: 'nueva-empresa', label: 'Nueva empresa', icon: Building2 },
   { id: 'catalogo', label: 'Catálogo de apps', icon: Package },
   { id: 'firmware', label: 'Firmware', icon: Cpu },
   { id: 'pirateria', label: 'Anti-piratería', icon: Skull },
 ];
 
-function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: LucideIcon; label: string; onClick: () => void }) {
+/** Lo que más se usa en la calle: queda a un toque en la barra inferior del celular. */
+const MOBILE_TABS: CompanySection[] = ['resumen', 'equipos', 'comunicados'];
+const ALL_COMPANY_ITEMS = COMPANY_NAV.flatMap((g) => g.items);
+
+/** Enlace real (se puede abrir en otra pestaña) que navega sin recargar con un clic normal. */
+function useRouteLink(go: (r: Route) => void) {
+  return (route: Route) => ({
+    href: formatRoute(route),
+    onClick: (e: MouseEvent<HTMLAnchorElement>) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      go(route);
+    },
+  });
+}
+
+function NavLink({ active, icon: Icon, label, link }: { active: boolean; icon: LucideIcon; label: string; link: { href: string; onClick: (e: MouseEvent<HTMLAnchorElement>) => void } }) {
   return (
-    <button
-      onClick={onClick}
-      className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
-        active ? 'bg-white/[0.08] text-white' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-100'
+    <a
+      {...link}
+      aria-current={active ? 'page' : undefined}
+      className={`group relative flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm transition ${
+        active ? 'bg-fill-2 font-medium text-fg' : 'text-fg-3 hover:bg-fill hover:text-fg'
       }`}
     >
-      <Icon className={`h-4 w-4 ${active ? 'text-indigo-300' : 'text-zinc-500 group-hover:text-zinc-300'}`} aria-hidden />
-      <span className="flex-1 text-left">{label}</span>
-    </button>
+      {active && <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" aria-hidden />}
+      <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-accent' : 'text-fg-4 group-hover:text-fg-2'}`} aria-hidden />
+      <span className="truncate">{label}</span>
+    </a>
   );
 }
 
+function NavGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-fg-4">{title}</div>
+      <div className="flex flex-col gap-0.5">{children}</div>
+    </div>
+  );
+}
+
+function CompanyAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-lg bg-accent-soft font-semibold text-accent ring-1 ring-inset ring-accent ${
+        size === 'sm' ? 'h-6 w-6 text-[10px]' : 'h-8 w-8 text-xs'
+      }`}
+      aria-hidden
+    >
+      {initials(name)}
+    </span>
+  );
+}
+
+/** Con más empresas que esto, el selector muestra un buscador (NEX administra muchas). */
+const SWITCHER_SEARCH_FROM = 7;
+
 function CompanySwitcher({ companies, current, onPick }: { companies: Company[]; current: Company; onPick: (id: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const many = companies.length >= SWITCHER_SEARCH_FROM;
+  const shown = query.trim() ? companies.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase())) : companies;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: globalThis.MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setOpen(false);
+      ref.current?.querySelector('button')?.focus();
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
+  const single = companies.length < 2;
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
-        disabled={companies.length < 2}
-        className="flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.05] disabled:cursor-default"
+        type="button"
+        onClick={() => {
+          setQuery('');
+          setOpen((o) => !o);
+        }}
+        disabled={single}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={single ? `Empresa: ${current.name}` : `Empresa: ${current.name}. Cambiar de empresa`}
+        className="flex w-full items-center gap-2.5 rounded-xl border border-line bg-fill px-2.5 py-2 text-left transition enabled:hover:border-line-strong enabled:hover:bg-fill-2 disabled:cursor-default"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-zinc-600 to-zinc-800 text-xs font-bold text-white">
-          {current.name.slice(0, 2).toUpperCase()}
-        </span>
+        <CompanyAvatar name={current.name} />
         <span className="min-w-0 flex-1">
-          <span className="block text-[10px] uppercase tracking-wider text-zinc-500">Empresa</span>
-          <span className="block truncate text-sm font-medium text-zinc-100">{current.name}</span>
+          <span className="block text-[11px] leading-4 text-fg-4">Empresa</span>
+          <span className="block truncate text-sm font-medium leading-5 text-fg">{current.name}</span>
         </span>
-        {companies.length > 1 && <ChevronDown className={`h-4 w-4 text-zinc-500 transition ${open ? 'rotate-180' : ''}`} aria-hidden />}
+        {!single && <ChevronsUpDown className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />}
       </button>
       {open && (
-        <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-xl border border-white/10 bg-[#171a24] p-1 shadow-xl">
-          {companies.map((c) => (
-            <button key={c.id} onClick={() => { setOpen(false); onPick(c.id); }}
-              className={`w-full rounded-lg px-3 py-2 text-left text-sm transition hover:bg-white/[0.06] ${c.id === current.id ? 'text-white' : 'text-zinc-400'}`}>
-              {c.name}
-            </button>
-          ))}
+        <div className="absolute inset-x-0 z-30 mt-1.5 animate-[nexIn_.12s_ease-out] rounded-xl border border-line bg-overlay p-1 shadow-pop">
+          {many && (
+            <SearchInput value={query} onChange={setQuery} placeholder="Buscar empresa…" className="mb-1" autoFocus />
+          )}
+          <ul role="listbox" aria-label="Empresas" className="max-h-72 overflow-y-auto">
+            {shown.map((c) => (
+              <li key={c.id} role="option" aria-selected={c.id === current.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onPick(c.id);
+                  }}
+                  className={`flex min-h-[2.25rem] w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition hover:bg-fill-2 ${
+                    c.id === current.id ? 'font-medium text-fg' : 'text-fg-2'
+                  }`}
+                >
+                  <CompanyAvatar name={c.name} size="sm" />
+                  <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                  {c.id === current.id && <Check className="h-4 w-4 shrink-0 text-accent" aria-hidden />}
+                </button>
+              </li>
+            ))}
+            {shown.length === 0 && <li className="px-2 py-3 text-center text-sm text-fg-4">Ninguna empresa coincide.</li>}
+          </ul>
         </div>
       )}
     </div>
@@ -425,7 +559,28 @@ function CompanyWorkspace({
   }
 }
 
-function Shell({ session }: { session: Session }) {
+/** Menú lateral del celular: se desliza desde la izquierda y encierra el foco mientras está abierto. */
+function MobileNav({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  useLayer(ref, onClose);
+  return (
+    <div className="fixed inset-0 z-40 animate-[nexFade_.15s_ease-out] bg-scrim lg:hidden" onMouseDown={onClose}>
+      <aside
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menú"
+        tabIndex={-1}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="h-full w-[min(19rem,88vw)] animate-[nexSlideLeft_.2s_ease-out] border-r border-line bg-surface shadow-pop outline-none"
+      >
+        {children}
+      </aside>
+    </div>
+  );
+}
+
+export function Shell({ session }: { session: Session }) {
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [isSuper, setIsSuper] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -466,89 +621,119 @@ function Shell({ session }: { session: Session }) {
     setMobileNav(false);
     navigate(r);
   };
+  const link = useRouteLink(nav);
+  const email = session.user.email ?? '';
+  const sectionLabel =
+    effective.scope === 'company'
+      ? ALL_COMPANY_ITEMS.find((n) => n.id === effective.section)?.label
+      : effective.scope === 'nex'
+        ? NEX_NAV.find((n) => n.id === effective.section)?.label
+        : undefined;
 
   const sidebar = (
-    <div className="flex h-full flex-col gap-6 p-4">
-      <div className="flex items-center justify-between px-1">
+    <div className="flex h-full flex-col">
+      <div className="flex h-14 shrink-0 items-center justify-between px-4">
         <Logo />
-        <button className="text-zinc-400 lg:hidden" aria-label="Cerrar menú" onClick={() => setMobileNav(false)}><X className="h-5 w-5" /></button>
+        <IconButton icon={X} label="Cerrar menú" className="-mr-1.5 lg:hidden" onClick={() => setMobileNav(false)} />
       </div>
-      {companies && switcherCompany && (
-        <CompanySwitcher
-          companies={companies}
-          current={switcherCompany}
-          onPick={(id) => nav({ scope: 'company', companyId: id, section: effective.scope === 'company' ? effective.section : 'resumen' })}
-        />
-      )}
-      {switcherCompany && (
-        <nav className="flex flex-col gap-0.5">
-          {COMPANY_NAV.map((n) => (
-            <NavButton key={n.id} icon={n.icon} label={n.label}
-              active={effective.scope === 'company' && effective.section === n.id}
-              onClick={() => nav({ scope: 'company', companyId: switcherCompany.id, section: n.id })} />
+      <div className="px-3 pb-3">
+        {companies && switcherCompany ? (
+          <CompanySwitcher
+            companies={companies}
+            current={switcherCompany}
+            onPick={(id) => nav({ scope: 'company', companyId: id, section: effective.scope === 'company' ? effective.section : 'resumen' })}
+          />
+        ) : (
+          !companies && !error && <Skeleton className="h-[54px]" />
+        )}
+      </div>
+      <nav aria-label="Secciones" className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pb-4 pt-1">
+        {switcherCompany &&
+          COMPANY_NAV.map((g) => (
+            <NavGroup key={g.group} title={g.group}>
+              {g.items.map((n) => (
+                <NavLink key={n.id} icon={n.icon} label={n.label}
+                  active={effective.scope === 'company' && effective.section === n.id}
+                  link={link({ scope: 'company', companyId: switcherCompany.id, section: n.id })} />
+              ))}
+            </NavGroup>
           ))}
-        </nav>
-      )}
-      {isSuper && (
-        <nav className="flex flex-col gap-0.5">
-          <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Administración NEX</div>
-          {NEX_NAV.map((n) => (
-            <NavButton key={n.id} icon={n.icon} label={n.label}
-              active={effective.scope === 'nex' && effective.section === n.id}
-              onClick={() => nav({ scope: 'nex', section: n.id })} />
-          ))}
-        </nav>
-      )}
-      <div className="mt-auto flex flex-col gap-2">
+        {isSuper && (
+          <NavGroup title="Administración NEX">
+            {NEX_NAV.map((n) => (
+              <NavLink key={n.id} icon={n.icon} label={n.label}
+                active={effective.scope === 'nex' && effective.section === n.id}
+                link={link({ scope: 'nex', section: n.id })} />
+            ))}
+          </NavGroup>
+        )}
+      </nav>
+      <div className="flex shrink-0 flex-col gap-2 border-t border-line p-3">
         <DownloadApk />
-        <ThemeToggle />
-      </div>
-      <div className="flex items-center gap-3 rounded-xl border border-white/[0.06] px-3 py-2.5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-semibold text-indigo-200">
-          {(session.user.email ?? '?').slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs text-zinc-200">{session.user.email}</div>
-          <div className="text-[10px] text-zinc-500">{isSuper ? 'NEX · super-admin' : 'Administrador'}</div>
+        <ThemeToggle className="w-full" />
+        <div className="flex items-center gap-2.5 px-1 pt-1">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fill-2 text-xs font-semibold text-fg-2 ring-1 ring-inset ring-line" aria-hidden>
+            {(email || '?').slice(0, 1).toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] leading-5 text-fg" title={email}>{email}</div>
+            <div className="text-[11px] leading-4 text-fg-4">{isSuper ? 'NEX · super-admin' : 'Administrador'}</div>
+          </div>
+          <Menu
+            trigger={(toggle, open) => (
+              <IconButton icon={LogOut} label="Opciones de sesión" aria-haspopup="menu" aria-expanded={open} onClick={toggle} />
+            )}
+            items={[
+              { label: 'Cerrar sesión', icon: LogOut, onClick: () => db().auth.signOut() },
+              // Revoca los refresh tokens en todos los navegadores (ej. si se perdió un celular).
+              { label: 'Cerrar en todos los dispositivos', icon: MonitorX, danger: true, onClick: () => db().auth.signOut({ scope: 'global' }) },
+            ]}
+            placement="top"
+          />
         </div>
-        <Menu
-          trigger={(toggle) => (
-            <button className="text-zinc-500 transition hover:text-white" title="Cerrar sesión" aria-label="Opciones de sesión" onClick={toggle}>
-              <LogOut className="h-4 w-4" />
-            </button>
-          )}
-          items={[
-            { label: 'Cerrar sesión', icon: LogOut, onClick: () => db().auth.signOut() },
-            // Revoca los refresh tokens en todos los navegadores (ej. si se perdió un celular).
-            { label: 'Cerrar en todos los dispositivos', icon: MonitorX, danger: true, onClick: () => db().auth.signOut({ scope: 'global' }) },
-          ]}
-          placement="top"
-        />
       </div>
     </div>
   );
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-white/[0.06] bg-[#0c0e14]/80 backdrop-blur lg:block">{sidebar}</aside>
-      {mobileNav && (
-        <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setMobileNav(false)}>
-          <aside className="h-full w-72 animate-[nexSlide_.2s_ease-out] border-r border-white/10 bg-[#0c0e14]" onClick={(e) => e.stopPropagation()}>{sidebar}</aside>
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-white/[0.06] bg-[#0a0b10]/80 px-4 py-3 backdrop-blur lg:hidden">
-          <button aria-label="Abrir menú" className="text-zinc-300" onClick={() => setMobileNav(true)}><MenuIcon className="h-5 w-5" /></button>
-          <span className="truncate text-sm font-medium text-white">{current?.name ?? 'NEX MDM'}</span>
+    <div className="flex min-h-[100dvh]">
+      <button
+        type="button"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[70] focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+        onClick={() => document.getElementById('contenido')?.focus()}
+      >
+        Ir al contenido
+      </button>
+      <aside className="sticky top-0 hidden h-[100dvh] w-[264px] shrink-0 border-r border-line bg-surface lg:block">{sidebar}</aside>
+      {mobileNav && <MobileNav onClose={() => setMobileNav(false)}>{sidebar}</MobileNav>}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 lg:hidden">
+          <IconButton icon={MenuIcon} label="Abrir menú" aria-haspopup="dialog" onClick={() => setMobileNav(true)} />
+          {current ? (
+            <button type="button" onClick={() => setMobileNav(true)} aria-label={`Empresa: ${current.name}. Abrir menú`} className="flex min-w-0 items-center gap-2.5 rounded-lg py-1 pr-2 text-left">
+              <CompanyAvatar name={current.name} />
+              <span className="truncate text-[15px] font-semibold text-fg">{current.name}</span>
+            </button>
+          ) : (
+            <span className="truncate text-[15px] font-semibold text-fg">{sectionLabel ?? 'NEX MDM'}</span>
+          )}
         </header>
-        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-          <ErrorText error={error} />
+
+        <main id="contenido" tabIndex={-1} className={`mx-auto w-full max-w-[1360px] flex-1 px-4 py-5 outline-none sm:px-6 lg:px-8 lg:py-8 ${current ? 'pb-24 lg:pb-10' : 'pb-10'}`}>
+          {companies && <ErrorText error={error} />}
           {!companies ? (
-            <div className="flex flex-col gap-4">
-              <Skeleton className="h-8 w-48" />
-              <Skeleton className="h-32" />
-              <Skeleton className="h-64" />
-            </div>
+            error ? (
+              <div className="mx-auto mt-16 max-w-md">
+                <ErrorState title="No pudimos cargar el panel" error={error} onRetry={() => { setError(null); setTick((t) => t + 1); }} />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4" role="status" aria-label="Cargando">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-32" />
+                <Skeleton className="h-64" />
+              </div>
+            )
           ) : effective.scope === 'company' && current ? (
             <CompanyWorkspace key={current.id} company={current} route={effective} navigate={navigate} onCompanyChanged={() => setTick((t) => t + 1)} />
           ) : effective.scope === 'nex' && effective.section === 'nueva-empresa' ? (
@@ -560,13 +745,46 @@ function Shell({ session }: { session: Session }) {
           ) : effective.scope === 'nex' && effective.section === 'pirateria' ? (
             <PiracyPage />
           ) : (
-            <div className="mx-auto mt-20 max-w-md text-center">
-              <Building2 className="mx-auto mb-4 h-10 w-10 text-zinc-600" aria-hidden />
-              <h1 className="text-lg font-semibold text-white">Todavía no tenés acceso a ninguna empresa</h1>
-              <p className="mt-2 text-sm text-zinc-400">Pedile a NEX o al dueño de tu empresa que te agregue como miembro.</p>
+            <div className="mx-auto mt-16 max-w-md">
+              <EmptyState icon={Building2} title="Todavía no tenés acceso a ninguna empresa">
+                Pedile a NEX o al dueño de tu empresa que te agregue como miembro.
+              </EmptyState>
             </div>
           )}
         </main>
+
+        {current && (
+          <nav aria-label="Accesos rápidos" className="pb-safe fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface lg:hidden">
+            <div className="mx-auto grid h-14 max-w-md grid-cols-4">
+              {MOBILE_TABS.map((id) => {
+                const item = ALL_COMPANY_ITEMS.find((n) => n.id === id)!;
+                const active = effective.scope === 'company' && effective.section === id;
+                return (
+                  <a
+                    key={id}
+                    {...link({ scope: 'company', companyId: current.id, section: id })}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition ${active ? 'text-accent' : 'text-fg-3'}`}
+                  >
+                    <item.icon className="h-5 w-5" aria-hidden />
+                    {item.label}
+                  </a>
+                );
+              })}
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                onClick={() => setMobileNav(true)}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition ${
+                  effective.scope !== 'company' || !MOBILE_TABS.includes(effective.section) ? 'text-accent' : 'text-fg-3'
+                }`}
+              >
+                <Ellipsis className="h-5 w-5" aria-hidden />
+                Más
+              </button>
+            </div>
+          </nav>
+        )}
       </div>
     </div>
   );
@@ -574,7 +792,7 @@ function Shell({ session }: { session: Session }) {
 
 export default function AdminApp() {
   if (!isAdminSupabaseConfigured) {
-    return <p className="p-8 text-zinc-300">Falta configurar VITE_SUPABASE_URL y la clave pública.</p>;
+    return <p className="p-8 text-fg-2">Falta configurar VITE_SUPABASE_URL y la clave pública.</p>;
   }
   return (
     <ToastProvider>
@@ -586,7 +804,12 @@ export default function AdminApp() {
 function AdminRoot() {
   const { session, stage, refresh } = useAuthStage();
   if (stage === 'loading') {
-    return <div className="flex min-h-screen items-center justify-center"><Logo size="lg" /></div>;
+    return (
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-6" role="status" aria-label="Cargando el panel">
+        <Logo size="lg" />
+        <LoaderCircle className="h-5 w-5 animate-spin text-fg-4" aria-hidden />
+      </div>
+    );
   }
   if (stage === 'signed-out' || !session) return <SignIn />;
   if (stage === 'mfa-enroll') return <MfaEnroll onDone={refresh} />;

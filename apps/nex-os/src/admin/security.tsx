@@ -97,7 +97,7 @@ export function StepUpProvider({ children }: { children: ReactNode }) {
         <Modal title="Confirmá que sos vos" description="Esta acción es sensible. Ingresá el código de tu app de autenticación." onClose={cancel} width="max-w-sm">
           <form onSubmit={verify} className="flex flex-col gap-4">
             <div className="flex justify-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-300">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
                 <ShieldCheck className="h-6 w-6" aria-hidden />
               </span>
             </div>
@@ -116,7 +116,7 @@ export function StepUpProvider({ children }: { children: ReactNode }) {
               <Button type="button" variant="secondary" className="flex-1" onClick={cancel}>Cancelar</Button>
               <Button type="submit" className="flex-1" disabled={busy || code.length !== 6}>Confirmar</Button>
             </div>
-            <p className="text-center text-xs text-zinc-500">No se vuelve a pedir durante unos minutos.</p>
+            <p className="text-center text-xs text-fg-4">No se vuelve a pedir durante unos minutos.</p>
           </form>
         </Modal>
       )}
@@ -187,8 +187,8 @@ export function IdleGuard({ idleMinutes = 15 }: { idleMinutes?: number }) {
         </>
       }
     >
-      <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-        <div className="h-full rounded-full bg-amber-400 transition-all" style={{ width: `${(remaining / 60) * 100}%` }} />
+      <div className="h-1.5 overflow-hidden rounded-full bg-fill-2">
+        <div className="h-full rounded-full bg-warn transition-all" style={{ width: `${(remaining / 60) * 100}%` }} />
       </div>
     </Modal>
   );
