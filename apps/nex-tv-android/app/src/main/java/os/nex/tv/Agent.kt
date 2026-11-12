@@ -414,6 +414,9 @@ object Agent {
             .put("owner", owner)
             .put("root", !owner && Provision.hasRoot())
             .put("updated_at", now())
+            // Versión instalada, para mostrarla en Ajustes.
+            .put("version", BuildConfig.VERSION_NAME)
+            .put("build", BuildConfig.VERSION_CODE)
             .put("logo", logo?.let { "/agent/$it" } ?: JSONObject.NULL)
             .put("company_name", company.opt("name") ?: JSONObject.NULL)
             .put("device_name", cfg.optJSONObject("device")?.opt("name") ?: JSONObject.NULL)

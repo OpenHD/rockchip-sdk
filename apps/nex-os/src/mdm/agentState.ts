@@ -51,6 +51,10 @@ export interface MdmState {
   apps: MdmApp[];
   /** Avisos que este equipo todavía no marcó como leídos, del más grave al más leve (máximo 5). */
   notices: MdmNotice[];
+  /** Versión instalada de NEX TV (la publica el agente de Android). null: el agente no la informa. */
+  version: string | null;
+  /** Número de compilación de NEX TV. null: el agente no lo informa. */
+  build: number | null;
 }
 
 export const isMdmBuild = import.meta.env.VITE_NEX_MDM === '1';
@@ -84,10 +88,23 @@ const STARTING: MdmState = {
   pairingExpiresAt: null,
   apps: [],
   notices: [],
+  version: null,
+  build: null,
 };
 
 function str(v: unknown, max = 280): string | null {
   return typeof v === 'string' && v.length > 0 ? v.slice(0, max) : null;
+}
+
+/** Solo versiones con forma de versión ("0.1.0", "1.4.2-beta"): cualquier otro texto se descarta. */
+const VERSION = /^\d{1,5}(\.\d{1,5}){1,3}([-+][0-9A-Za-z.]{1,16})?$/;
+
+function parseVersion(v: unknown): string | null {
+  return typeof v === 'string' && VERSION.test(v) ? v : null;
+}
+
+function parseBuild(v: unknown): number | null {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 }
 
 function parseApp(v: unknown): MdmApp | null {
@@ -187,6 +204,8 @@ export function parseAgentState(raw: unknown): MdmState {
       ? o.apps.map(parseApp).filter((a): a is MdmApp => a !== null)
       : [],
     notices: parseNotices(o.notices),
+    version: parseVersion(o.version),
+    build: parseBuild(o.build),
   };
 }
 
