@@ -35,7 +35,11 @@ import { SIGNUP_ENABLED, TURNSTILE_SITE_KEY } from './config';
 import Turnstile from './Turnstile';
 import { db, run, type Company } from './api';
 import { FILTERS } from './deviceMeta';
+import { AcceptLink, ForgotPassword, SetPassword } from './AuthFlows';
+import { parseAuthLink, passwordPending } from './authLink';
+import ChangePasswordModal from './ChangePassword';
 import DownloadApk from './DownloadApk';
+import { passwordProblem } from './password';
 import { initials } from './format';
 import { useLayer } from './layer';
 import ThemeToggle from './ThemeToggle';
@@ -132,7 +136,7 @@ function AuthLayout({ title, subtitle, step, children }: { title: string; subtit
 export function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [mode, setMode] = useState<'in' | 'up'>('in');
+  const [mode, setMode] = useState<'in' | 'up' | 'forgot'>('in');
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -169,10 +173,8 @@ export function SignIn() {
         if (err) throw err;
         setFailures(0);
       } else {
-        if (password.length < 12) throw new Error('Usá una contraseña de al menos 12 caracteres');
-        if (/^(.)\1+$/.test(password) || password.toLowerCase().includes(email.split('@')[0].toLowerCase())) {
-          throw new Error('Elegí una contraseña que no repita caracteres ni contenga tu email');
-        }
+        const problem = passwordProblem(password, email);
+        if (problem) throw new Error(problem);
         const { error: err } = await auth.signUp({ email, password, options });
         if (err) throw err;
         setInfo('Revisá tu email para confirmar la cuenta. Después, NEX o el dueño de tu empresa te da acceso.');
@@ -199,6 +201,17 @@ export function SignIn() {
       if (TURNSTILE_SITE_KEY) setCaptchaReset((k) => k + 1);
     }
   };
+
+  if (mode === 'forgot') {
+    return (
+      <AuthLayout title="Olvidé mi contraseña" subtitle="Te mandamos un link por email para definir una nueva.">
+        <div className="flex flex-col gap-4">
+          {TURNSTILE_SITE_KEY && <Turnstile onToken={onCaptcha} resetKey={captchaReset} />}
+          <ForgotPassword captchaToken={captcha} captchaRequired={Boolean(TURNSTILE_SITE_KEY)} onBack={() => { setMode('in'); setError(null); }} />
+        </div>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout
@@ -231,6 +244,11 @@ export function SignIn() {
         <Button type="submit" loading={busy} disabled={wait > 0} className="h-11">
           {wait > 0 ? `Esperá ${wait} s` : mode === 'in' ? 'Ingresar' : 'Crear cuenta'}
         </Button>
+        {mode === 'in' && (
+          <button type="button" className="rounded-md py-1 text-sm text-fg-3 transition hover:text-fg" onClick={() => { setMode('forgot'); setError(null); }}>
+            Olvidé mi contraseña
+          </button>
+        )}
         {SIGNUP_ENABLED ? (
           <button type="button" className="rounded-md py-1 text-sm text-fg-3 transition hover:text-fg" onClick={() => setMode(mode === 'in' ? 'up' : 'in')}>
             {mode === 'in' ? '¿No tenés cuenta? Crear una' : 'Ya tengo cuenta'}
@@ -586,6 +604,7 @@ export function Shell({ session }: { session: Session }) {
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [mobileNav, setMobileNav] = useState(false);
+  const [changePassword, setChangePassword] = useState(false);
   const [route, navigate] = useRoute();
 
   useEffect(() => {
@@ -684,6 +703,7 @@ export function Shell({ session }: { session: Session }) {
               <IconButton icon={LogOut} label="Opciones de sesión" aria-haspopup="menu" aria-expanded={open} onClick={toggle} />
             )}
             items={[
+              { label: 'Cambiar contraseña', icon: KeyRound, onClick: () => setChangePassword(true) },
               { label: 'Cerrar sesión', icon: LogOut, onClick: () => db().auth.signOut() },
               // Revoca los refresh tokens en todos los navegadores (ej. si se perdió un celular).
               { label: 'Cerrar en todos los dispositivos', icon: MonitorX, danger: true, onClick: () => db().auth.signOut({ scope: 'global' }) },
@@ -691,6 +711,7 @@ export function Shell({ session }: { session: Session }) {
             placement="top"
           />
         </div>
+        {changePassword && <ChangePasswordModal email={email} onClose={() => setChangePassword(false)} />}
       </div>
     </div>
   );
@@ -803,6 +824,9 @@ export default function AdminApp() {
 
 function AdminRoot() {
   const { session, stage, refresh } = useAuthStage();
+  // Link de un email de invitación o recuperación (se lee una vez; AcceptLink lo saca de la URL).
+  const [link, setLink] = useState(() => parseAuthLink(window.location.search, window.location.hash));
+  if (link) return <AcceptLink link={link} Layout={AuthLayout} onDone={() => { setLink(null); void refresh(); }} />;
   if (stage === 'loading') {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-6" role="status" aria-label="Cargando el panel">
@@ -812,6 +836,11 @@ function AdminRoot() {
     );
   }
   if (stage === 'signed-out' || !session) return <SignIn />;
+  // Después del link: primero la contraseña. Si la cuenta ya tiene TOTP, Supabase exige el código antes (mfa-verify).
+  const pending = passwordPending();
+  if (pending && (stage === 'mfa-enroll' || stage === 'ready')) {
+    return <SetPassword email={session.user.email ?? ''} type={pending} Layout={AuthLayout} onDone={() => void refresh()} />;
+  }
   if (stage === 'mfa-enroll') return <MfaEnroll onDone={refresh} />;
   if (stage === 'mfa-verify') return <MfaVerify onDone={refresh} />;
   return (

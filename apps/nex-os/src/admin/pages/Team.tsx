@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Ban, Copy, KeyRound, Plug, ScrollText, TriangleAlert, UserPlus, Users } from 'lucide-react';
-import { db, run, type ApiKey, type AuditEntry, type Company, type Member, type NewApiKey } from '../api';
+import { db, inviteMember, run, type ApiKey, type AuditEntry, type Company, type Member, type NewApiKey } from '../api';
 import { AUDIT_LABELS, copyText, formatDate, relativeTime } from '../format';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
@@ -31,8 +31,16 @@ export function MembersPage({ company }: { company: Company }) {
     setBusy(true);
     setError(null);
     try {
-      await stepUp.guard(() => run(db().rpc('mdm_set_member', { p_company: company.id, p_email: email, p_role: r })));
-      toast.show(r ? `${email} ahora es ${r === 'owner' ? 'dueño' : 'admin'}` : `${email} ya no tiene acceso`);
+      const address = email.trim().toLowerCase();
+      if (r === 'admin' || r === 'owner') {
+        const { invited } = await stepUp.guard(() => inviteMember(company.id, address, r));
+        toast.show(invited
+          ? `Le mandamos una invitación a ${address}: define su contraseña desde el link del email`
+          : `${address} ahora es ${r === 'owner' ? 'dueño' : 'admin'}`);
+      } else {
+        await stepUp.guard(() => run(db().rpc('mdm_set_member', { p_company: company.id, p_email: address, p_role: null })));
+        toast.show(`${address} ya no tiene acceso`);
+      }
       setEmail('');
       setTick((t) => t + 1);
     } catch (err) {
@@ -65,7 +73,7 @@ export function MembersPage({ company }: { company: Company }) {
             </ul>
           )}
         </Card>
-        <Card title="Agregar o cambiar" description="La persona tiene que haber creado su cuenta y activado el segundo factor." className="xl:col-span-2">
+        <Card title="Invitar o cambiar rol" description="Si la persona no tiene cuenta, le llega un email para definir su contraseña y activar el segundo factor. Nadie tiene que pasarle una contraseña." className="xl:col-span-2">
           <div className="flex flex-col gap-4">
             <Field label="Email">
               <input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tecnico@empresa.com" />
@@ -81,7 +89,7 @@ export function MembersPage({ company }: { company: Company }) {
             </div>
             <ErrorText error={error} />
             <div className="flex gap-2">
-              <Button icon={UserPlus} disabled={busy || !email} onClick={() => setMember(role)} className="flex-1">Guardar</Button>
+              <Button icon={UserPlus} disabled={busy || !email} onClick={() => setMember(role)} className="flex-1">Invitar o guardar</Button>
               <Button variant="ghost" disabled={busy || !email} onClick={() => setMember(null)} className="text-danger hover:bg-danger-soft hover:text-danger">Quitar acceso</Button>
             </div>
           </div>

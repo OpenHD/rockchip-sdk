@@ -373,3 +373,17 @@ export function addDays(isoDate: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * Invita (o suma, si ya tiene cuenta) a un miembro por email con la Edge Function mdm-invite (schema-mdm-v14.sql).
+ * Los errores llegan con el código de Postgres: P0401 hace que el panel pida el segundo factor y reintente.
+ */
+export async function inviteMember(company: string, email: string, role: 'admin' | 'owner'): Promise<{ invited: boolean }> {
+  const { data, error } = await db().functions.invoke<{ invited: boolean }>('mdm-invite', { body: { company, email, role } });
+  if (error) {
+    const ctx = (error as { context?: Response }).context;
+    const body = ctx && typeof ctx.json === 'function' ? await ctx.json().catch(() => null) : null;
+    throw new ApiError(body?.message ?? 'No se pudo invitar. Probá de nuevo en unos minutos.', body?.code);
+  }
+  return data ?? { invited: false };
+}
