@@ -152,6 +152,7 @@ object Agent {
                 }
                 prevMode = mode
 
+                FactoryRisk.tick(app)
                 if (t - lastReport >= REPORT_INTERVAL || NetDiag.lastQuick == null) {
                     NetDiag.quickAsync(app)
                 }
@@ -413,6 +414,9 @@ object Agent {
             .put("owner", owner)
             .put("root", !owner && Provision.hasRoot())
             .put("updated_at", now())
+            // Versión instalada, para mostrarla en Ajustes.
+            .put("version", BuildConfig.VERSION_NAME)
+            .put("build", BuildConfig.VERSION_CODE)
             .put("logo", logo?.let { "/agent/$it" } ?: JSONObject.NULL)
             .put("company_name", company.opt("name") ?: JSONObject.NULL)
             .put("device_name", cfg.optJSONObject("device")?.opt("name") ?: JSONObject.NULL)
@@ -564,7 +568,7 @@ object Agent {
             .put("uptime", SystemClock.elapsedRealtime() / 1000)
             .put("free_mb", app.filesDir.usableSpace / (1024 * 1024))
             .put("agent", AGENT_VERSION)
-            .also { NetDiag.putDeviceHealth(app, it) }
+            .also { NetDiag.putDeviceHealth(app, it); FactoryRisk.putHealth(it) }
     }
 
     private fun reportBlocked() {
