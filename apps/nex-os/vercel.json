@@ -5,7 +5,7 @@
       "has": [
         {
           "type": "host",
-          "value": "nex-mdm-demo.vercel.app"
+          "value": "nex-mdm-demo(-[a-z0-9]+-shadownrxs-projects)?\\.vercel\\.app"
         }
       ],
       "destination": "/admin",
