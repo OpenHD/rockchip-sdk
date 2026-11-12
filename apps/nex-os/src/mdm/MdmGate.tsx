@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import WifiScreen from './WifiScreen';
+import { SettingsScreen, TechPin } from './SettingsScreen';
+import { useAppearance } from './useAppearance';
 import qrcode from 'qrcode-generator';
 import AppRegistry from '../components/AppRegistry';
 import { useAgentState, type MdmApp, type MdmNotice, type MdmState } from './agentState';
@@ -200,7 +202,7 @@ function RootSetup({ state }: { state: MdmState }) {
   }, [state.wifiToken]);
 
   if (step === 'pin') {
-    return <div className="fixed inset-0 z-50"><TechPin onOk={() => void activate()} onCancel={cancel} /></div>;
+    return <div className="fixed top-0 left-0 z-50 w-screen h-screen"><TechPin onOk={() => void activate()} onCancel={cancel} /></div>;
   }
   return <>
     <button ref={button} disabled={step === 'busy'} onClick={() => { setMessage(''); setStep('pin'); }} className="text-xl rounded-xl px-5 py-3 border border-amber-300/40 text-amber-100 outline-none focus:bg-white/20 focus:ring-2 focus:ring-sky-300">
@@ -335,293 +337,6 @@ function formatDue(date: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
 }
 
-/** Versión de NEX TV mostrada en Ajustes (se define al compilar la imagen). */
-const NEX_VERSION = (import.meta.env.VITE_NEX_VERSION as string | undefined) ?? '0.1';
-
-/** PIN del acceso técnico (se define al compilar; por defecto, solo para demo). */
-const TECH_PIN = (import.meta.env.VITE_NEX_TECH_PIN as string | undefined) ?? '2468';
-
-type Appearance = { dimWallpaper: boolean; bigTiles: boolean };
-const APPEARANCE_KEY = 'nex.tv.appearance';
-
-/** Preferencias visuales por equipo. localStorage es solo una conveniencia: si falla, usa los valores por defecto. */
-function useAppearance(): [Appearance, (p: Partial<Appearance>) => void] {
-  const [pref, setPref] = useState<Appearance>(() => {
-    try {
-      return { dimWallpaper: false, bigTiles: false, ...JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? '{}') };
-    } catch {
-      return { dimWallpaper: false, bigTiles: false };
-    }
-  });
-  const update = useCallback((p: Partial<Appearance>) => {
-    setPref((prev) => {
-      const next = { ...prev, ...p };
-      try {
-        localStorage.setItem(APPEARANCE_KEY, JSON.stringify(next));
-      } catch {
-        // Sin almacenamiento: el cambio vale solo para esta sesión.
-      }
-      return next;
-    });
-  }, []);
-  return [pref, update];
-}
-
-function SettingsRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between py-4 border-b border-white/10">
-      <span className="text-white/60 text-xl">{label}</span>
-      <span className="text-xl">{value}</span>
-    </div>
-  );
-}
-
-function Toggle({ on, index, label, onToggle }: { on: boolean; index: number; label: string; onToggle: () => void }) {
-  return (
-    <button
-      data-index={index}
-      onClick={onToggle}
-      className="w-full flex items-center justify-between py-4 border-b border-white/10 outline-none rounded-lg px-3 -mx-3 focus:bg-white/10"
-    >
-      <span className="text-xl">{label}</span>
-      <span className={`h-7 w-12 rounded-full flex items-center px-1 transition-colors ${on ? 'bg-sky-400' : 'bg-white/20'}`}>
-        <span className={`h-5 w-5 rounded-full bg-white transition-transform ${on ? 'translate-x-5' : ''}`} />
-      </span>
-    </button>
-  );
-}
-
-/** Teclado numérico para el acceso técnico. El PIN no viaja a ningún lado; es una barrera local. */
-function TechPin({ onOk, onCancel }: { onOk: () => void; onCancel: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [val, setVal] = useState('');
-  const [err, setErr] = useState(false);
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', '✕'];
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
-        e.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
-  const press = (d: string) => {
-    if (d === '✕') return onCancel();
-    if (d === '⌫') return setVal((v) => v.slice(0, -1));
-    setErr(false);
-    const next = (val + d).slice(0, 4);
-    setVal(next);
-    if (next.length === 4) {
-      if (next === TECH_PIN) {
-        window.setTimeout(onOk, 150);
-      } else {
-        setErr(true);
-        window.setTimeout(() => setVal(''), 500);
-      }
-    }
-  };
-
-  const onKeyNav = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const cur = Number((document.activeElement as HTMLElement | null)?.dataset.index ?? -1);
-    if (cur < 0) return;
-    const d: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 3, ArrowUp: -3 };
-    const step = d[e.key];
-    if (step === undefined) return;
-    e.preventDefault();
-    const n = Math.min(Math.max(cur + step, 0), keys.length - 1);
-    ref.current?.querySelector<HTMLButtonElement>(`button[data-index="${n}"]`)?.focus();
-  };
-
-  return (
-    <div className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center space-y-8 select-none">
-      <div className="text-center">
-        <div className="text-sky-300 text-sm uppercase tracking-[0.3em] mb-2">Acceso técnico</div>
-        <div className="text-2xl text-white/70">Ingresá el PIN del instalador</div>
-      </div>
-      <div className={`flex space-x-4 ${err ? 'animate-pulse' : ''}`}>
-        {[0, 1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className={`h-6 w-6 rounded-full border-2 ${err ? 'border-red-400' : 'border-white/40'} ${i < val.length ? (err ? 'bg-red-400' : 'bg-white') : ''}`}
-          />
-        ))}
-      </div>
-      <div ref={ref} onKeyDown={onKeyNav} className="grid grid-cols-3 gap-4">
-        {keys.map((k, i) => (
-          <button
-            key={k}
-            data-index={i}
-            onClick={() => press(k)}
-            className="h-20 w-20 rounded-2xl bg-white/5 border border-white/10 text-3xl font-light outline-none focus:bg-white/20 focus:border-white/70 hover:bg-white/10"
-          >
-            {k}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** Panel técnico (tras el PIN): diagnóstico del equipo y acciones de servicio. */
-function TechPanel({ state, onClose }: { state: MdmState; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [message, setMessage] = useState('');
-  // Sin Device Owner, Guard devuelve al inicio cualquier app no permitida: esto le da al técnico unos minutos.
-  const openAndroidSettings = useCallback(async () => {
-    try {
-      const res = await fetch(`/agent/setup/settings?token=${encodeURIComponent(state.wifiToken ?? '')}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (!data.ok) setMessage('No se pudieron abrir los Ajustes de Android.');
-    } catch {
-      setMessage('No se pudieron abrir los Ajustes de Android.');
-    }
-  }, [state.wifiToken]);
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const onKeyNav = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    e.preventDefault();
-    const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('button[data-index]') ?? []);
-    const cur = btns.findIndex((b) => b === document.activeElement);
-    btns[Math.min(Math.max(cur + (e.key === 'ArrowDown' ? 1 : -1), 0), btns.length - 1)]?.focus();
-  };
-
-  return (
-    <div ref={ref} onKeyDown={onKeyNav} className="w-screen h-screen bg-gradient-to-b from-[#0b1020] to-[#05070c] text-white flex flex-col select-none px-16 py-10 overflow-auto">
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <div className="text-sky-300 text-sm uppercase tracking-[0.3em]">Modo técnico</div>
-          <h1 className="text-4xl font-semibold">Diagnóstico del equipo</h1>
-        </div>
-        <button data-index="0" onClick={onClose} className="px-5 py-2 rounded-lg bg-white/10 outline-none focus:bg-white/25 text-lg">
-          ← Volver
-        </button>
-      </header>
-
-      <div className="grid grid-cols-2 gap-x-16 gap-y-10 max-w-6xl">
-        <section>
-          <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Equipo</h2>
-          <SettingsRow label="Nombre" value={state.deviceName ?? 'Sin nombre'} />
-          <SettingsRow label="Proveedor" value={state.companyName ?? 'NEX'} />
-          <SettingsRow label="NEX TV" value={`v${NEX_VERSION}`} />
-          <SettingsRow label="Modo" value={<span className="text-emerald-300">Activo</span>} />
-          <SettingsRow label="Conexión" value={<span className={navigator.onLine ? 'text-emerald-300' : 'text-amber-300'}>{navigator.onLine ? 'En línea' : 'Sin conexión'}</span>} />
-        </section>
-
-        <section className="flex flex-col space-y-4">
-          <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Servicio</h2>
-          <button data-index="1" onClick={() => window.location.reload()} className="w-full text-left rounded-xl bg-white/5 border border-white/10 px-5 py-4 text-xl outline-none focus:bg-white/15 focus:border-white/60">
-            Reiniciar la interfaz
-          </button>
-          {!state.owner && (
-            <button data-index="2" onClick={() => void openAndroidSettings()} className="w-full text-left rounded-xl bg-white/5 border border-white/10 px-5 py-4 text-xl outline-none focus:bg-white/15 focus:border-white/60">
-              Abrir Ajustes de Android (10 min)
-            </button>
-          )}
-          {message && <p role="status" className="text-lg text-amber-100">{message}</p>}
-          <p className="text-white/40 text-base leading-relaxed">
-            Desvincular el equipo o reiniciar el sistema se hacen desde el panel de tu empresa. El soporte de NEX también
-            puede ayudarte de forma remota.
-          </p>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function SettingsScreen({ state, appearance, setAppearance, onClose }: {
-  state: MdmState;
-  appearance: Appearance;
-  setAppearance: (p: Partial<Appearance>) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [online, setOnline] = useState(() => navigator.onLine);
-  const [tech, setTech] = useState<'none' | 'pin' | 'panel'>('none');
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
-    const up = () => setOnline(true);
-    const down = () => setOnline(false);
-    window.addEventListener('online', up);
-    window.addEventListener('offline', down);
-    return () => {
-      window.removeEventListener('online', up);
-      window.removeEventListener('offline', down);
-    };
-  }, []);
-
-  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const btns = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('button[data-index]') ?? []);
-      const cur = btns.findIndex((b) => b === document.activeElement);
-      const next = Math.min(Math.max(cur + (e.key === 'ArrowDown' ? 1 : -1), 0), btns.length - 1);
-      btns[next]?.focus();
-    }
-  };
-
-  if (tech === 'pin') return <TechPin onOk={() => setTech('panel')} onCancel={() => setTech('none')} />;
-  if (tech === 'panel') return <TechPanel state={state} onClose={() => setTech('none')} />;
-
-  return (
-    <div ref={ref} onKeyDown={onKey} className="w-screen h-screen bg-gradient-to-b from-[#0b1020] to-[#05070c] text-white flex flex-col select-none px-16 py-10 overflow-auto">
-      <header className="flex items-center justify-between mb-8">
-        <h1 className="text-4xl font-semibold">Ajustes</h1>
-        <button data-index="0" onClick={onClose} className="px-5 py-2 rounded-lg bg-white/10 outline-none focus:bg-white/25 text-lg">
-          ← Volver
-        </button>
-      </header>
-
-      <div className="grid grid-cols-2 gap-x-16 gap-y-10 max-w-6xl">
-        <section>
-          <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Equipo</h2>
-          <SettingsRow label="Nombre" value={state.deviceName ?? 'Sin nombre'} />
-          <SettingsRow label="Estado" value={<span className="text-emerald-300">Vinculado</span>} />
-          <SettingsRow label="Proveedor" value={state.companyName ?? 'NEX'} />
-          <SettingsRow label="NEX TV" value={`v${NEX_VERSION}`} />
-        </section>
-
-        <section>
-          <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Red</h2>
-          <SettingsRow
-            label="Conexión"
-            value={<span className={online ? 'text-emerald-300' : 'text-amber-300'}>{online ? 'Conectado' : 'Sin conexión'}</span>}
-          />
-          <WifiEntry state={state} label="Cambiar red Wi-Fi" />
-        </section>
-
-        <section className="col-span-2">
-          <h2 className="text-sky-300 text-lg uppercase tracking-widest mb-2">Apariencia</h2>
-          <Toggle index={1} label="Atenuar el fondo" on={appearance.dimWallpaper} onToggle={() => setAppearance({ dimWallpaper: !appearance.dimWallpaper })} />
-          <Toggle index={2} label="Mosaicos más grandes" on={appearance.bigTiles} onToggle={() => setAppearance({ bigTiles: !appearance.bigTiles })} />
-        </section>
-      </div>
-
-      <div className="mt-auto pt-10 flex justify-end">
-        <button data-index="3" onClick={() => setTech('pin')} className="text-white/35 text-sm rounded-lg px-3 py-2 outline-none focus:bg-white/10 focus:text-white/80">
-          Acceso técnico
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const SETTINGS_ITEM: MdmApp = { id: 'ajustes', name: 'Ajustes', kind: 'internal', launch_url: null, icon: null, install: false };
 
 function TvHome({ state, notice, noticeCount, onReadNotice }: {
@@ -636,6 +351,7 @@ function TvHome({ state, notice, noticeCount, onReadNotice }: {
   const [showSettings, setShowSettings] = useState(false);
   const [appearance, setAppearance] = useAppearance();
   const [sel, setSel] = useState(0);
+  const selRef = useRef(0);
   const homeRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const bannerRef = useRef<HTMLButtonElement>(null);
@@ -660,7 +376,9 @@ function TvHome({ state, notice, noticeCount, onReadNotice }: {
     // Si el foco ya está en el inicio (dock o aviso), un cambio de estado del equipo no lo mueve.
     const active = document.activeElement;
     if (active instanceof HTMLButtonElement && homeRef.current?.contains(active)) return;
-    dockRef.current?.querySelector<HTMLButtonElement>('button[data-index="0"]')?.focus();
+    // Al volver de Ajustes o de una app, el foco queda en el mosaico desde el que se entró.
+    (dockRef.current?.querySelector<HTMLButtonElement>(`button[data-index="${selRef.current}"]`)
+      ?? dockRef.current?.querySelector<HTMLButtonElement>('button[data-index="0"]'))?.focus();
   }, [openApp, showSettings, apps]);
 
   useEffect(() => {
@@ -675,17 +393,7 @@ function TvHome({ state, notice, noticeCount, onReadNotice }: {
     return () => window.removeEventListener('keydown', onKey);
   }, [openApp]);
 
-  useEffect(() => {
-    if (!showSettings) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (BACK_KEYS.has(e.key) && !noticeOpen()) {
-        e.preventDefault();
-        setShowSettings(false);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [showSettings]);
+  const closeSettings = useCallback(() => setShowSettings(false), []);
 
   const activate = useCallback((app: MdmApp) => {
     if (app.id === SETTINGS_ITEM.id) {
@@ -739,7 +447,16 @@ function TvHome({ state, notice, noticeCount, onReadNotice }: {
   }
 
   if (showSettings) {
-    return <SettingsScreen state={state} appearance={appearance} setAppearance={setAppearance} onClose={() => setShowSettings(false)} />;
+    return (
+      <SettingsScreen
+        state={state}
+        appearance={appearance}
+        setAppearance={setAppearance}
+        brand={<Brand state={state} size="sm" />}
+        clock={clock}
+        onClose={closeSettings}
+      />
+    );
   }
 
   return (
@@ -810,9 +527,9 @@ function TvHome({ state, notice, noticeCount, onReadNotice }: {
             data-index={i}
             role="menuitem"
             aria-label={app.install ? `Instalar ${app.name}` : app.name}
-            onFocus={() => setSel(i)}
+            onFocus={() => { selRef.current = i; setSel(i); }}
             onClick={() => activate(app)}
-            className={`relative h-20 w-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center outline-none transition-transform focus:scale-110 focus:bg-white/20 focus:border-white/70 hover:bg-white/10 ${app.install ? 'focus:ring-4 focus:ring-white/60' : ''}`}
+            className={`relative ${appearance.bigTiles ? 'h-28 w-28' : 'h-20 w-20'} rounded-full bg-white/5 border border-white/10 flex items-center justify-center outline-none transition-transform focus:scale-110 focus:bg-white/20 focus:border-white/70 hover:bg-white/10 ${app.install ? 'focus:ring-4 focus:ring-white/60' : ''}`}
           >
             {app.install ? (
               <>
@@ -822,7 +539,7 @@ function TvHome({ state, notice, noticeCount, onReadNotice }: {
                 </span>
               </>
             ) : (
-              <AppIcon app={app} size="sm" />
+              <AppIcon app={app} size={appearance.bigTiles ? 'md' : 'sm'} />
             )}
           </button>
         ))}
