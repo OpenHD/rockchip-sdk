@@ -4,7 +4,7 @@ import { db, run, type ApiKey, type AuditEntry, type Company, type Member, type 
 import { AUDIT_LABELS, copyText, formatDate, relativeTime } from '../format';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
-import { Badge, Button, Card, EmptyState, ErrorText, Field, IconButton, inputClass, Modal, PageHeader, Skeleton } from '../ui';
+import { Badge, Button, Card, EmptyState, ErrorText, Field, IconButton, inputClass, Modal, PageHeader, Skeleton, Callout } from '../ui';
 
 export function MembersPage({ company }: { company: Company }) {
   const toast = useToast();
@@ -45,20 +45,20 @@ export function MembersPage({ company }: { company: Company }) {
   return (
     <>
       <PageHeader title="Miembros" subtitle="Quiénes administran los equipos de la empresa" />
-      <div className="grid gap-6 xl:grid-cols-5">
+      <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-5">
         <Card title="Con acceso" className="xl:col-span-3" padded={false}>
           {!members ? (
-            <div className="flex flex-col gap-2 p-5">{[0, 1].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+            <div className="flex flex-col gap-2 p-4 sm:p-5">{[0, 1].map((i) => <Skeleton key={i} className="h-10" />)}</div>
           ) : members.length === 0 ? (
             <EmptyState icon={Users} title="Sin miembros" />
           ) : (
-            <ul className="divide-y divide-white/[0.05] pb-2">
+            <ul className="divide-y divide-line">
               {members.map((m) => (
-                <li key={m.user_id} className="flex items-center gap-3 px-5 py-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500/40 to-violet-500/40 text-xs font-semibold text-white">
+                <li key={m.user_id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent ring-1 ring-inset ring-accent" aria-hidden>
                     {m.user_id.slice(0, 2).toUpperCase()}
                   </span>
-                  <span className="flex-1 font-mono text-xs text-zinc-400">{m.user_id}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3" title={m.user_id}>{m.user_id}</span>
                   <Badge tone={m.role === 'owner' ? 'info' : 'neutral'}>{m.role === 'owner' ? 'Dueño' : 'Admin'}</Badge>
                 </li>
               ))}
@@ -72,17 +72,17 @@ export function MembersPage({ company }: { company: Company }) {
             </Field>
             <div className="grid grid-cols-2 gap-2">
               {(['admin', 'owner'] as const).map((r) => (
-                <button key={r} onClick={() => setRole(r)}
-                  className={`rounded-xl border p-3 text-left transition ${role === r ? 'border-indigo-400/60 bg-indigo-500/15' : 'border-white/10 hover:border-white/20'}`}>
-                  <div className="text-sm font-medium text-white">{r === 'owner' ? 'Dueño' : 'Admin'}</div>
-                  <div className="text-xs text-zinc-400">{r === 'owner' ? 'Todo, más miembros y desvincular' : 'Equipos, apps, pagos y avisos'}</div>
+                <button key={r} type="button" aria-pressed={role === r} onClick={() => setRole(r)}
+                  className={`rounded-xl border p-3 text-left transition ${role === r ? 'border-accent bg-accent-soft' : 'border-line-strong hover:bg-fill'}`}>
+                  <div className="text-sm font-medium text-fg">{r === 'owner' ? 'Dueño' : 'Admin'}</div>
+                  <div className="text-xs text-fg-3">{r === 'owner' ? 'Todo, más miembros y desvincular' : 'Equipos, apps, pagos y avisos'}</div>
                 </button>
               ))}
             </div>
             <ErrorText error={error} />
             <div className="flex gap-2">
               <Button icon={UserPlus} disabled={busy || !email} onClick={() => setMember(role)} className="flex-1">Guardar</Button>
-              <Button variant="ghost" disabled={busy || !email} onClick={() => setMember(null)} className="text-rose-300">Quitar acceso</Button>
+              <Button variant="ghost" disabled={busy || !email} onClick={() => setMember(null)} className="text-danger hover:bg-danger-soft hover:text-danger">Quitar acceso</Button>
             </div>
           </div>
         </Card>
@@ -113,18 +113,23 @@ export function AuditPage({ company }: { company: Company }) {
       <ErrorText error={error} />
       <Card padded={false}>
         {!rows ? (
-          <div className="flex flex-col gap-2 p-5">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+          <div className="flex flex-col gap-2 p-4 sm:p-5">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10" />)}</div>
         ) : rows.length === 0 ? (
           <EmptyState icon={ScrollText} title="Sin acciones registradas" />
         ) : (
-          <ul className="divide-y divide-white/[0.05] pb-2">
+          <ul className="divide-y divide-line">
             {rows.map((r) => (
-              <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm">
-                <span className="min-w-[12rem] font-medium text-zinc-100">{AUDIT_LABELS[r.action] ?? r.action}</span>
-                <span className="flex-1 truncate font-mono text-xs text-zinc-500">
-                  {Object.entries(r.details).filter(([, v]) => v !== null && v !== '').map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}
-                </span>
-                <span className="text-xs text-zinc-500" title={new Date(r.created_at).toLocaleString('es-AR')}>{relativeTime(r.created_at)}</span>
+              <li key={r.id} className="flex items-start gap-4 px-4 py-3 text-sm sm:px-5">
+                <div className="min-w-0 flex-1 sm:flex sm:items-baseline sm:gap-4">
+                  <span className="block font-medium text-fg sm:w-64 sm:shrink-0">
+                    {AUDIT_LABELS[r.action] ?? r.action}
+                    {r.actor?.startsWith('api:') && <span className="ml-2 align-middle"><Badge>API · {r.actor.slice(4)}</Badge></span>}
+                  </span>
+                  <span className="block min-w-0 flex-1 break-words font-mono text-xs leading-5 text-fg-4 sm:truncate">
+                    {Object.entries(r.details).filter(([, v]) => v !== null && v !== '').map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}
+                  </span>
+                </div>
+                <span className="shrink-0 whitespace-nowrap text-xs leading-5 text-fg-4" title={new Date(r.created_at).toLocaleString('es-AR')}>{relativeTime(r.created_at)}</span>
               </li>
             ))}
           </ul>
@@ -187,17 +192,14 @@ function NewKeyModal({ created, onClose }: { created: NewApiKey; onClose: () => 
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span>
-            Copiala ahora y guardala en un lugar seguro: <strong>no se vuelve a mostrar</strong>. Quien la tenga puede bloquear y
-            desbloquear los equipos de la empresa. Si la perdés, revocala y creá otra.
-          </span>
-        </div>
-        <code className="select-all break-all rounded-lg border border-white/10 bg-black/40 px-3 py-3 font-mono text-sm text-zinc-100">
+        <Callout tone="warning" icon={TriangleAlert} title="No se vuelve a mostrar">
+          Copiala ahora y guardala en un lugar seguro. Quien la tenga puede bloquear y desbloquear los equipos de la empresa.
+          Si la perdés, revocala y creá otra.
+        </Callout>
+        <code className="select-all break-all rounded-lg border border-line bg-inset px-3 py-3 font-mono text-sm text-fg">
           {created.key}
         </code>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-fg-4">
           Usala en el encabezado <span className="font-mono">Authorization: Bearer {created.prefix}…</span> de la API del ISP.
         </p>
       </div>
@@ -260,25 +262,25 @@ export function ApiKeysPage({ company }: { company: Company }) {
   return (
     <>
       <PageHeader title="API" subtitle="Claves para que el sistema de gestión del ISP bloquee, desbloquee y registre pagos automáticamente" />
-      <div className="grid gap-6 xl:grid-cols-5">
+      <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-5">
         <Card title="Claves" className="xl:col-span-3" padded={false}>
           {!keys ? (
-            <div className="flex flex-col gap-2 p-5">{[0, 1].map((i) => <Skeleton key={i} className="h-10" />)}</div>
+            <div className="flex flex-col gap-2 p-4 sm:p-5">{[0, 1].map((i) => <Skeleton key={i} className="h-10" />)}</div>
           ) : keys.length === 0 ? (
             <EmptyState icon={Plug} title="Sin claves de API">Creá una para integrar el sistema de facturación o el CRM.</EmptyState>
           ) : (
-            <ul className="divide-y divide-white/[0.05] pb-2">
+            <ul className="divide-y divide-line">
               {keys.map((k) => (
-                <li key={k.id} className={`flex items-center gap-3 px-5 py-3 ${k.revoked_at ? 'opacity-60' : ''}`}>
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-zinc-400">
+                <li key={k.id} className={`flex items-center gap-3 px-4 py-3 sm:px-5 ${k.revoked_at ? 'opacity-60' : ''}`}>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fill text-fg-3">
                     <KeyRound className="h-4 w-4" aria-hidden />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-zinc-100">{k.name}</span>
+                      <span className="truncate text-sm font-medium text-fg">{k.name}</span>
                       {k.revoked_at && <Badge tone="danger">Revocada</Badge>}
                     </div>
-                    <div className="text-xs text-zinc-500">
+                    <div className="text-xs text-fg-4">
                       <span className="font-mono">{k.prefix}…</span> · creada el {formatDate(k.created_at)} ·{' '}
                       {k.revoked_at ? `revocada ${relativeTime(k.revoked_at)}` : k.last_used_at ? `usada ${relativeTime(k.last_used_at)}` : 'sin uso'}
                     </div>
@@ -293,7 +295,7 @@ export function ApiKeysPage({ company }: { company: Company }) {
         </Card>
         <Card title="Nueva clave" description="Solo los dueños de la empresa pueden crear y revocar claves." className="xl:col-span-2">
           {isOwner === false ? (
-            <p className="text-sm text-zinc-400">Pedile a un dueño de la empresa que cree la clave.</p>
+            <p className="text-sm text-fg-3">Pedile a un dueño de la empresa que cree la clave.</p>
           ) : (
             <form onSubmit={create} className="flex flex-col gap-4">
               <Field label="Nombre" hint="Para saber quién la usa. Ej. Sistema de facturación">
@@ -319,7 +321,7 @@ export function ApiKeysPage({ company }: { company: Company }) {
             </>
           }
         >
-          <p className="text-sm text-zinc-300">
+          <p className="text-sm text-fg-2">
             El sistema que la use deja de poder operar los equipos de inmediato. No se puede deshacer.
           </p>
         </Modal>

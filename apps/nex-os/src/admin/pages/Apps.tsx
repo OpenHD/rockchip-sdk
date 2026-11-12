@@ -12,7 +12,7 @@ function hostOf(url: string | null): string {
 }
 import { useToast } from '../toast';
 import AndroidAppsSection from './AndroidApps';
-import { Badge, Card, EmptyState, ErrorText, PageHeader, Skeleton, Switch } from '../ui';
+import { Badge, Callout, Card, EmptyState, ErrorText, PageHeader, Skeleton, Switch } from '../ui';
 
 export default function AppsPage({ company }: { company: Company }) {
   const toast = useToast();
@@ -70,14 +70,10 @@ export default function AppsPage({ company }: { company: Company }) {
         title="Apps"
         subtitle={catalog ? `${enabled.size} de ${catalog.length} habilitadas en los equipos de ${company.name}` : 'Cargando…'}
       />
-      <div className="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 text-sm text-emerald-100/90">
-        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" aria-hidden />
-        <div>
-          <div className="font-medium text-emerald-200">Lista blanca</div>
-          En los TV solo funciona lo que esté habilitado acá. Todo lo demás, incluidos los sitios y apps piratas, queda bloqueado
-          en el navegador y en el DNS del equipo.
-        </div>
-      </div>
+      <Callout tone="success" icon={ShieldCheck} title="Lista blanca" className="mb-5">
+        En los TV solo funciona lo que esté habilitado acá. Todo lo demás, incluidos los sitios y apps piratas, queda bloqueado
+        en el navegador y en el DNS del equipo.
+      </Callout>
       <ErrorText error={error} />
       {!catalog ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-24" />)}</div>
@@ -90,17 +86,17 @@ export default function AppsPage({ company }: { company: Company }) {
             return (
               <div
                 key={app.id}
-                className={`flex items-center gap-4 rounded-2xl border p-4 transition ${on ? 'border-indigo-400/30 bg-indigo-500/[0.06]' : 'border-white/[0.07] bg-white/[0.025]'}`}
+                className={`flex items-center gap-4 rounded-xl border p-4 shadow-card transition ${on ? 'border-accent bg-accent-soft' : 'border-line bg-surface'}`}
               >
                 <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-lg font-bold text-white shadow-inner ${appGradient(app.id)}`}>
                   {app.name.charAt(0)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-zinc-100">{app.name}</span>
+                    <span className="truncate text-sm font-semibold text-fg">{app.name}</span>
                     {app.kind === 'internal' && <Badge tone="info">NEX-OS</Badge>}
                   </div>
-                  <div className="truncate text-xs text-zinc-500">
+                  <div className="truncate text-xs text-fg-4">
                     {app.kind === 'web' ? hostOf(app.launch_url) : 'App integrada'} · {app.domains.length} dominios
                   </div>
                 </div>

@@ -15,7 +15,7 @@ function stored(): ThemeChoice {
   }
 }
 
-/** Tema efectivo ("light" o "dark"), el que leen admin-light.css y el captcha. */
+/** Tema efectivo ("light" o "dark"), el que leen los tokens de admin.css (data-theme) y el captcha. */
 export function resolvedTheme(choice: ThemeChoice = stored()): 'light' | 'dark' {
   return choice === 'system' ? (media.matches ? 'light' : 'dark') : choice;
 }
