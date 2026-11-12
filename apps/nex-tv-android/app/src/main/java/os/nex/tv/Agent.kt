@@ -152,6 +152,7 @@ object Agent {
                 }
                 prevMode = mode
 
+                FactoryRisk.tick(app)
                 if (t - lastReport >= REPORT_INTERVAL || NetDiag.lastQuick == null) {
                     NetDiag.quickAsync(app)
                 }
@@ -564,7 +565,7 @@ object Agent {
             .put("uptime", SystemClock.elapsedRealtime() / 1000)
             .put("free_mb", app.filesDir.usableSpace / (1024 * 1024))
             .put("agent", AGENT_VERSION)
-            .also { NetDiag.putDeviceHealth(app, it) }
+            .also { NetDiag.putDeviceHealth(app, it); FactoryRisk.putHealth(it) }
     }
 
     private fun reportBlocked() {
