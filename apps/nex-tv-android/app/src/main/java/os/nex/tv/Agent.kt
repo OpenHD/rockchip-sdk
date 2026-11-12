@@ -423,13 +423,13 @@ object Agent {
             .put("pairing_code", if (mode == "unpaired") pair.opt("pairing_code") ?: JSONObject.NULL else JSONObject.NULL)
             .put("pairing_expires_at", if (mode == "unpaired") pair.opt("pairing_expires_at") ?: JSONObject.NULL else JSONObject.NULL)
             .put("apps", apps)
-            .put("notices", pendingNotices(cfg))
+            .put("notices", pendingNotices(cfg).also(::surfaceEmergencies))
             .toString()
     }
 
     // ---- Comunicados del ISP ----
 
-    private val UUID_RE = Regex("[0-9a-f-]{36}")
+    private val UUID_RE = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
     private fun seenNotices(): Set<String> =
         noticesSeenFile.readOrNull()?.lines()?.filter { UUID_RE.matches(it) }?.toSet() ?: emptySet()
@@ -440,7 +440,9 @@ object Agent {
         val list = cfg.optJSONArray("notices") ?: return out
         val seen = seenNotices()
         val t = maxOf(now(), serverEpochFile.readOrNull()?.toLongOrNull() ?: 0L)
-        for (i in 0 until minOf(list.length(), 5)) {
+        // Se filtra antes de cortar en 5: uno nuevo no queda escondido detrás de otros ya vistos.
+        for (i in 0 until minOf(list.length(), 20)) {
+            if (out.length() >= 5) break
             val n = list.optJSONObject(i) ?: continue
             val id = n.optString("id")
             if (!UUID_RE.matches(id) || id in seen || n.optLong("expires_at", 0) <= t) continue
@@ -451,6 +453,21 @@ object Agent {
                 .put("expires_at", n.optLong("expires_at")))
         }
         return out
+    }
+
+    private val announced = HashSet<String>()
+
+    /** Una emergencia nueva trae NEX TV al frente aunque el cliente esté en otra app (Netflix, YouTube...). */
+    private fun surfaceEmergencies(notices: JSONArray) {
+        for (i in 0 until notices.length()) {
+            val n = notices.optJSONObject(i) ?: continue
+            if (n.optString("severity") != "emergencia" || !announced.add(n.optString("id"))) continue
+            Log.i(TAG, "comunicado de emergencia: trayendo NEX TV al frente")
+            runCatching {
+                app.startActivity(Intent(app, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            }.onFailure { Log.w(TAG, "no se pudo traer NEX TV al frente", it) }
+        }
     }
 
     /** La UI avisa que el usuario vio el comunicado: deja de mostrarse y se informa al panel. */
