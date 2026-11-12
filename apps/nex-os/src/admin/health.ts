@@ -1,4 +1,4 @@
-import type { Device } from './api';
+import type { Device, FactoryRisk } from './api';
 
 /**
  * Semáforo de salud del TV box (0-100) y lectura del diagnóstico de red.
@@ -81,6 +81,21 @@ function networkPenalties(n: NetQuick | undefined, add: (text: string, points: n
   if (inetMs !== null && inetMs >= 200) add(`Latencia alta a internet (${Math.round(inetMs)} ms)`, 5);
 }
 
+/** Subida sostenida (Mbps) a partir de la cual el equipo se marca como posible infectado. */
+export const UPLOAD_ALERT_MBPS = 5;
+
+const PORT_NAMES: Record<number, string> = { 40000: 'shell root remoto (40000)', 5555: 'ADB por red (5555)' };
+
+/** Puertas de fábrica abiertas en texto, para el panel. Vacío si no hay ninguna o el equipo no lo informa. */
+export function factoryRisks(f: FactoryRisk | undefined): string[] {
+  if (!f) return [];
+  return [
+    ...(f.ports ?? []).map((p) => PORT_NAMES[p] ?? `puerto ${p}`),
+    ...(f.su ? ['su con permisos de root'] : []),
+    ...(f.pkgs ?? []).map((p) => `app de control remoto ${p}`),
+  ];
+}
+
 export function healthScore(d: Device, inputs: HealthInputs | undefined, now = Date.now()): HealthScore {
   if (!d.last_seen_at) return { score: null, band: 'sin-datos', reasons: [] };
   const h = d.health ?? {};
@@ -115,6 +130,13 @@ export function healthScore(d: Device, inputs: HealthInputs | undefined, now = D
   }
 
   networkPenalties(h.net, add);
+
+  // Firmas del incidente de CAPPI (ver CureBox): subida alta sin uso y accesos remotos de fábrica.
+  const up = num(h.up_mbps);
+  if (up !== null && up >= 20) add(`Sube ${up} Mbps sin uso: posible equipo infectado`, 50);
+  else if (up !== null && up >= UPLOAD_ALERT_MBPS) add(`Sube ${up} Mbps sin uso: posible equipo infectado`, 35);
+  const risks = factoryRisks(h.factory);
+  if (risks.length) add(`Puertas traseras de fábrica abiertas: ${risks.join(', ')}`, 25);
 
   if (inputs) {
     if (inputs.boots >= 6) add(`${inputs.boots} encendidos en 24 h`, 25);

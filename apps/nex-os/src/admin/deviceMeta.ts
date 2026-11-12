@@ -1,7 +1,7 @@
 import { Ban, CircleCheck, Clock, CreditCard, Lock, WifiOff, type LucideIcon } from 'lucide-react';
 import { deviceStatus, isOnline, type Company, type Device, type DeviceStatus, type ServiceState } from './api';
 import { daysFromToday, formatDate } from './format';
-import { isLowHealth, type HealthScore } from './health';
+import { factoryRisks, isLowHealth, UPLOAD_ALERT_MBPS, type HealthScore } from './health';
 import type { Tone } from './ui';
 
 /** Presentación del estado de un equipo (compartido entre Resumen y Equipos). */
@@ -30,17 +30,23 @@ export const STATE_SOURCE_LABELS: Record<string, string> = {
 
 export function healthIssues(d: Device): string[] {
   const h = d.health ?? {};
+  const security = [
+    typeof h.up_mbps === 'number' && h.up_mbps >= UPLOAD_ALERT_MBPS && `Subida alta sin uso (${h.up_mbps} Mbps): posible equipo infectado`,
+    factoryRisks(h.factory).length > 0 && `Puertas traseras de fábrica: ${factoryRisks(h.factory).join(', ')}`,
+  ].filter(Boolean) as string[];
   // En Android no existen el DNS ni el firewall del sistema: no es una falla, filtra dentro de las apps de NEX TV.
   if (h.platform === 'android') {
     return [
       h.hardened === false && 'Sin modo TV cerrado (NEX TV no es Device Owner)',
       h.webview_filter === false && 'Filtro anti-piratería caído',
+      ...security,
     ].filter(Boolean) as string[];
   }
   return [
     h.hardened === false && 'Imagen sin modo TV cerrado',
     h.dns_filter === false && 'Filtro DNS caído',
     h.firewall === false && 'Firewall no disponible',
+    ...security,
   ].filter(Boolean) as string[];
 }
 

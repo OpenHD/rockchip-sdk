@@ -8,6 +8,8 @@ import {
   Globe,
   HardDrive,
   HeartPulse,
+  ShieldAlert,
+  Upload,
   LoaderCircle,
   Power,
   RefreshCw,
@@ -29,6 +31,7 @@ import {
   bandCounts,
   DIAG_SLOW_MS,
   diagState,
+  factoryRisks,
   netSegments,
   netVerdict,
   VERDICT_META,
@@ -178,6 +181,8 @@ export function HealthSection({ device, score, inputs }: { device: Device; score
           <Metric icon={Power} label="Encendidos (24 h)" value={inputs ? String(inputs.boots) : '—'} />
           <Metric icon={RotateCw} label="Reinicios de NEX (24 h)" value={inputs ? String(inputs.restarts) : '—'} />
           <Metric icon={Bug} label="Errores (24 h)" value={inputs ? String(inputs.errors) : '—'} />
+          <Metric icon={Upload} label="Subida sin uso (5 min)" value={typeof h.up_mbps === 'number' ? `${h.up_mbps} Mbps` : '—'} />
+          <Metric icon={ShieldAlert} label="Puertas de fábrica" value={!h.factory ? '—' : factoryRisks(h.factory).length ? `${factoryRisks(h.factory).length} abiertas` : 'Cerradas'} />
         </dl>
 
         {partial && (

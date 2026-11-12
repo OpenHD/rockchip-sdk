@@ -51,6 +51,18 @@ export interface DeviceHealth {
   storage_mb?: number;
   /** Medición liviana de red (cada 5 min). */
   net?: NetQuick;
+  /** Mbps subidos por el equipo sin contar a NEX, promedio de 5 min (ver FactoryRisk en NEX TV). */
+  up_mbps?: number;
+  /** Puertas traseras del firmware de fábrica que siguen abiertas. Vacío = ninguna. */
+  factory?: FactoryRisk;
+}
+
+/** Lo que NEX TV encontró del firmware de fábrica vulnerable (los HiSilicon del incidente de CAPPI). */
+export interface FactoryRisk {
+  /** 40000 = shell root remoto (cmd_root), 5555 = ADB por red. */
+  ports?: number[];
+  su?: boolean;
+  pkgs?: string[];
 }
 
 export interface DeviceEvent {
@@ -85,6 +97,8 @@ export const EVENT_LABELS: Record<string, string> = {
   app_installed: 'App del operador instalada',
   app_install_failed: 'No se pudo instalar una app del operador',
   app_removed: 'App del operador desinstalada',
+  upload_anomaly: 'Subida alta sin uso (posible equipo infectado)',
+  factory_backdoor: 'Puertas traseras de fábrica abiertas',
 };
 
 export const DEVICE_COLUMNS =

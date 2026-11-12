@@ -824,3 +824,15 @@ amarillo 50-79, rojo < 50. Lo que el equipo no informa no resta.
 - Panel: `npx vitest run` (lector de APK con un APK mínimo compilado con aapt2, puntaje de salud y veredicto de red).
 - Falta probar en un TV box real: instalación y desinstalación silenciosa de un APK del ISP, `ping` sin root en el
   firmware del TX6698, temperatura en `/sys/class/thermal`, y la prueba de velocidad.
+
+## v13: equipo comprometido en firmware de fábrica
+
+Los TV box HiSilicon "bigfish" del incidente de CAPPI subían 40-100 Mbps sin uso y traían de fábrica un shell root
+remoto (cmd_root en TCP/40000), ADB por red (TCP/5555), su con setuid y apps de control remoto (`com.example.himac`,
+`com.lz.sysplugin`); ver [CureBox](https://github.com/macch-ai/curebox), `docs/HANDOFF.md`.
+
+NEX TV (agente 3, `FactoryRisk.kt`) informa en health `up_mbps` (subida de 5 min sin contar a NEX) y `factory`
+(puertas abiertas), y manda `upload_anomaly` (más de 5 Mbps durante 15 min) y `factory_backdoor`. Los dos son
+categoría "Manipulación": llegan por Telegram/mail si la empresa tiene esas alertas. En el panel restan salud
+(35-50 y 25 puntos) y aparecen en el filtro "Con alertas". NEX solo informa: cerrar esos accesos requiere reparar el
+firmware (CureBox). Despliegue: correr `supabase/schema-mdm-v13.sql` (idempotente, después de v12).
