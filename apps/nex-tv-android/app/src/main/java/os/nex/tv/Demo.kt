@@ -49,6 +49,9 @@ object Demo {
                 .put("offline_lock_days", 7))
             .put("device", JSONObject().put("name", "TV del living"))
             .put("blocked_domains", JSONArray())
+            // App del ISP desde la Play Store (v12): sin instalar, se ve como mosaico "Instalar".
+            .put("android_apps", JSONArray().put(JSONObject()
+                .put("package", "com.chsistemas.software.tvplaymain").put("name", "TV Play").put("source", "play")))
             // Un comunicado de ejemplo del ISP (v12): se ve en el inicio hasta que se lo marca como visto.
             .put("notices", if (state == "activo" || state == "aviso") JSONArray().put(JSONObject()
                 .put("id", "0d1e2f30-4152-4637-8899-aabbccddeeff")
