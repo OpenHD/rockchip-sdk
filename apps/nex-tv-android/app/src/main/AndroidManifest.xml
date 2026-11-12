@@ -1,10 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Serie del equipo para el hardware_id (solo se concede siendo Device Owner). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Solo como app de sistema privilegiada (install-system.sh): actualizarse sin confirmación y volver a
+         proteger el equipo después de un reset de fábrica (Heal). Instalada como app común, Android no los da. -->
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SET_TIME_ZONE" tools:ignore="ProtectedPermissions" />
+    <!-- Desinstalar las apps del ISP que NEX instaló cuando el ISP las quita del panel (ManagedApps). -->
+    <uses-permission android:name="android.permission.DELETE_PACKAGES" tools:ignore="ProtectedPermissions" />
+    <!-- Ver si las apps del ISP ya están instaladas (también las que no tienen ícono de launcher). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
     <!-- Para listar la Play Store y las apps del usuario como mosaicos de NEX-OS. -->
     <queries>
@@ -31,6 +47,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="${nexNetworkConfig}"
         android:theme="@style/Theme.Nex">
 
         <!-- NEX-OS es la pantalla de inicio: Android queda por debajo. -->
@@ -50,9 +67,44 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- Android 8+ abre esta pantalla al terminar la instalación por QR. -->
+            <intent-filter>
+                <action android:name="android.app.action.PROVISIONING_SUCCESSFUL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
-        <!-- Device Owner: se activa una sola vez por ADB (ver README). -->
+        <!-- Instalación por QR en Android 10+: el sistema pregunta el modo y confirma las políticas. -->
+        <activity
+            android:name=".ProvisioningActivity"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <receiver android:name=".ManagedAppReceiver" android:exported="false" />
+        <!-- Al arrancar: como app de sistema, NEX vuelve a dejar el equipo protegido (Heal). -->
+        <receiver android:name=".BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".PackageReplacedReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Device Owner: se activa una sola vez por ADB, QR o root (ver README). -->
         <receiver
             android:name=".AdminReceiver"
             android:exported="true"
@@ -62,6 +114,7 @@
                 android:resource="@xml/device_admin" />
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
             </intent-filter>
         </receiver>
 
@@ -84,5 +137,19 @@
                 <action android:name="os.nex.tv.RELEASE" />
             </intent-filter>
         </receiver>
+
+        <!-- Bloqueo sin Device Owner (Guard): lo activa el técnico por ADB al instalar (ver README). -->
+        <service
+            android:name=".Guard"
+            android:exported="true"
+            android:label="@string/guard_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/guard" />
+        </service>
     </application>
 </manifest>

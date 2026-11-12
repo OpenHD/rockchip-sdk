@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">NEX-OS</string>
+    <string name="app_name">NEX TV</string>
+    <string name="guard_label">Protección de NEX TV</string>
+    <string name="guard_description">Mantiene el equipo dentro de NEX TV: si se abre una app que tu proveedor no permite, vuelve al inicio.</string>
 </resources>
