@@ -49,6 +49,11 @@ class UiServer(private val ctx: Context) {
     fun shouldBlockNavigation(url: Uri): Boolean {
         if (url.scheme == "https" && url.host == HOST) {
             val path = url.path.orEmpty()
+            // Mosaico "Instalar" de una app de la Play Store cargada por el ISP: abre su ficha.
+            if (path.startsWith(ManagedApps.PLAY_PREFIX)) {
+                ManagedApps.openPlay(ctx, Agent.configSnapshot(), path.removePrefix(ManagedApps.PLAY_PREFIX))
+                return true
+            }
             if (!path.startsWith(AndroidApps.LAUNCH_PREFIX)) return false
             // Mosaico de una app Android: se abre la app y la UI se queda donde estaba.
             AndroidApps.launch(ctx, path.removePrefix(AndroidApps.LAUNCH_PREFIX))
@@ -94,6 +99,13 @@ class UiServer(private val ctx: Context) {
             }.isSuccess
             return json(200, JSONObject().put("ok", opened))
         }
+        // La UI avisa que el usuario vio un comunicado del ISP.
+        if (path == "/agent/notice/seen") {
+            if (!MessageDigest.isEqual(Agent.wifiToken.toByteArray(), url.getQueryParameter("token").orEmpty().toByteArray())) {
+                return json(403, JSONObject().put("ok", false).put("error", "Token inválido"))
+            }
+            return json(200, JSONObject().put("ok", Agent.markNoticeSeen(url.getQueryParameter("id").orEmpty())))
+        }
         if (path == "/agent/ui-state.json") {
             return WebResourceResponse("application/json", "utf-8", 200, "OK", NO_STORE,
                 ByteArrayInputStream(Agent.uiState.toByteArray()))
@@ -110,7 +122,7 @@ class UiServer(private val ctx: Context) {
             return text(404, "Not found")
         }
         // Nunca se carga como página: shouldBlockNavigation la convierte en "abrir la app".
-        if (path.startsWith(AndroidApps.LAUNCH_PREFIX)) return text(204, "")
+        if (path.startsWith(AndroidApps.LAUNCH_PREFIX) || path.startsWith(ManagedApps.PLAY_PREFIX)) return text(204, "")
         // El panel de administración no viaja en el TV box.
         if (path == "/admin.html" || path.startsWith("/admin")) return text(404, "Not found")
 

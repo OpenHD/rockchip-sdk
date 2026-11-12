@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object Agent {
     private const val TAG = "nex-agent"
-    private const val AGENT_VERSION = 2
+    private const val AGENT_VERSION = 3
     private const val SYNC_INTERVAL = 60L
     private const val REPORT_INTERVAL = 300L
     private const val LOOP_MS = 5_000L
@@ -51,6 +51,8 @@ object Agent {
     private val appliedFile get() = File(dir, "applied_mode")
     private val bootFile get() = File(dir, "boot")
     private val demoStateFile get() = File(dir, "demo_state")
+    private val noticesSeenFile get() = File(dir, "notices_seen")
+    private val diagReqFile get() = File(dir, "diag_req")
     val logoDir: File get() = File(dir, "branding")
 
     val wifiToken: String = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -73,6 +75,7 @@ object Agent {
     private var payWarn = false
     private val onceKeys = HashSet<String>()
     @Volatile private var forceSync = false
+    @Volatile private var diagRunning = false
 
     fun start(context: Context) {
         if (::app.isInitialized) return
@@ -122,7 +125,13 @@ object Agent {
                 if (forceSync || t - lastSyncTry >= interval) {
                     forceSync = false
                     lastSyncTry = t
-                    if (syncRemote()) updateLogo()
+                    if (syncRemote()) {
+                        updateLogo()
+                        config()?.let { cfg ->
+                            if (mode == "active" || mode == "starting") ManagedApps.sync(app, cfg, mdmUrl)
+                            maybeRunDiag(cfg)
+                        }
+                    }
                 }
 
                 computeMode()
@@ -143,6 +152,9 @@ object Agent {
                 }
                 prevMode = mode
 
+                if (t - lastReport >= REPORT_INTERVAL || NetDiag.lastQuick == null) {
+                    NetDiag.quickAsync(app)
+                }
                 if (t - lastReport >= REPORT_INTERVAL) {
                     lastReport = t
                     reportBlocked()
@@ -384,6 +396,13 @@ object Agent {
                     .put("kind", "web").put("launch_url", "${UiServer.ORIGIN}${AndroidApps.LAUNCH_PREFIX}${a.pkg}")
                     .put("icon", "${AndroidApps.ICON_PREFIX}${a.pkg}"))
             }
+            // Apps de la Play Store que cargó el ISP y todavía no están instaladas: mosaico "Instalar".
+            for (e in ManagedApps.playPending(app, cfg)) {
+                apps.put(JSONObject()
+                    .put("id", "play:${e.pkg}".take(41)).put("name", e.name)
+                    .put("kind", "web").put("launch_url", "${UiServer.ORIGIN}${ManagedApps.PLAY_PREFIX}${e.pkg}")
+                    .put("icon", JSONObject.NULL).put("install", true))
+            }
         }
         // Nunca se publica el token del MDM ni la configuración cruda.
         val owner = Kiosk.isOwner(app)
@@ -404,7 +423,74 @@ object Agent {
             .put("pairing_code", if (mode == "unpaired") pair.opt("pairing_code") ?: JSONObject.NULL else JSONObject.NULL)
             .put("pairing_expires_at", if (mode == "unpaired") pair.opt("pairing_expires_at") ?: JSONObject.NULL else JSONObject.NULL)
             .put("apps", apps)
+            .put("notices", pendingNotices(cfg))
             .toString()
+    }
+
+    // ---- Comunicados del ISP ----
+
+    private val UUID_RE = Regex("[0-9a-f-]{36}")
+
+    private fun seenNotices(): Set<String> =
+        noticesSeenFile.readOrNull()?.lines()?.filter { UUID_RE.matches(it) }?.toSet() ?: emptySet()
+
+    /** Vigentes y todavía no vistos en este equipo (texto plano: la UI no lo interpreta como HTML). */
+    private fun pendingNotices(cfg: JSONObject): JSONArray {
+        val out = JSONArray()
+        val list = cfg.optJSONArray("notices") ?: return out
+        val seen = seenNotices()
+        val t = maxOf(now(), serverEpochFile.readOrNull()?.toLongOrNull() ?: 0L)
+        for (i in 0 until minOf(list.length(), 5)) {
+            val n = list.optJSONObject(i) ?: continue
+            val id = n.optString("id")
+            if (!UUID_RE.matches(id) || id in seen || n.optLong("expires_at", 0) <= t) continue
+            val severity = n.optString("severity").takeIf { it in setOf("info", "importante", "emergencia") } ?: continue
+            out.put(JSONObject().put("id", id)
+                .put("title", n.str("title").take(80)).put("body", n.str("body").take(500))
+                .put("category", n.optString("category", "general")).put("severity", severity)
+                .put("expires_at", n.optLong("expires_at")))
+        }
+        return out
+    }
+
+    /** La UI avisa que el usuario vio el comunicado: deja de mostrarse y se informa al panel. */
+    fun markNoticeSeen(id: String): Boolean {
+        if (!::dir.isInitialized || !UUID_RE.matches(id)) return false
+        val cfg = config() ?: return false
+        val list = cfg.optJSONArray("notices") ?: return false
+        if ((0 until list.length()).none { list.optJSONObject(it)?.optString("id") == id }) return false
+        val seen = seenNotices()
+        if (id !in seen) {
+            noticesSeenFile.writeAtomic((seen.toList().takeLast(49) + id).joinToString("\n"))
+            addEvent("notice_seen", JSONObject().put("id", id))
+        }
+        requestUiRefresh()
+        return true
+    }
+
+    /** Vuelve a publicar el estado para la UI (después de instalar una app o ver un comunicado). */
+    fun requestUiRefresh() {
+        if (!::dir.isInitialized) return
+        runCatching { publishUiState() }.onFailure { Log.w(TAG, "no se pudo publicar el estado", it) }
+    }
+
+    // ---- Diagnóstico de red pedido desde el panel ----
+
+    private fun maybeRunDiag(cfg: JSONObject) {
+        val req = cfg.optLong("diag_request", 0)
+        if (req <= 0 || diagRunning || req <= (diagReqFile.readOrNull()?.toLongOrNull() ?: 0L)) return
+        diagReqFile.writeAtomic(req.toString())
+        diagRunning = true
+        Thread({
+            try {
+                addEvent("net_diag", NetDiag.full(app, req, mdmUrl))
+                forceSync = true
+            } catch (e: Exception) {
+                addEvent("net_diag", JSONObject().put("req", req).put("error", (e.message ?: "error").take(120)))
+            } finally {
+                diagRunning = false
+            }
+        }, "nex-net-diag").apply { isDaemon = true }.start()
     }
 
     fun currentLogo(): File? =
@@ -461,6 +547,7 @@ object Agent {
             .put("uptime", SystemClock.elapsedRealtime() / 1000)
             .put("free_mb", app.filesDir.usableSpace / (1024 * 1024))
             .put("agent", AGENT_VERSION)
+            .also { NetDiag.putDeviceHealth(app, it) }
     }
 
     private fun reportBlocked() {
@@ -519,6 +606,9 @@ object Agent {
     // optString devuelve "null" para valores null de JSON.
     private fun JSONObject.str(key: String): String =
         if (isNull(key)) "" else optString(key)
+
+    /** Configuración del último sync (solo lectura, para UiServer). */
+    fun configSnapshot(): JSONObject? = if (::dir.isInitialized) config() else null
 
     private fun config(): JSONObject? =
         configFile.readOrNull()?.let { runCatching { JSONObject(it) }.getOrNull() }

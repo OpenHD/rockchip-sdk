@@ -49,6 +49,13 @@ object Demo {
                 .put("offline_lock_days", 7))
             .put("device", JSONObject().put("name", "TV del living"))
             .put("blocked_domains", JSONArray())
+            // Un comunicado de ejemplo del ISP (v12): se ve en el inicio hasta que se lo marca como visto.
+            .put("notices", if (state == "activo" || state == "aviso") JSONArray().put(JSONObject()
+                .put("id", "0d1e2f30-4152-4637-8899-aabbccddeeff")
+                .put("title", "Corte programado del servicio")
+                .put("body", "El jueves de 2 a 4 h vamos a hacer mejoras en la red. Puede haber cortes breves.")
+                .put("category", "corte").put("severity", "importante")
+                .put("expires_at", now + 2 * day)) else JSONArray())
             // Solo apps que tienen sentido en un TV (sin calculadora, fotos de ejemplo, reloj ni calendario).
             .put("apps", JSONArray()
                 .put(web("youtube", "YouTube", "https://www.youtube.com/tv",

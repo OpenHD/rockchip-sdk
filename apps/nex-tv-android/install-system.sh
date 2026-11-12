@@ -107,7 +107,7 @@ bad() { echo "    ✗ $*"; fail=1; }
 info=$(dev dumpsys package "$PKG")
 if grep -q 'codePath=/system/priv-app/NexTv' <<<"$info"; then ok "NEX está en la partición del sistema"; else bad "NEX no aparece en el sistema"; fi
 if grep -q 'PRIVILEGED' <<<"$info"; then ok "NEX es app privilegiada"; else bad "NEX no es app privilegiada"; fi
-for p in INSTALL_PACKAGES WRITE_SECURE_SETTINGS CHANGE_COMPONENT_ENABLED_STATE SET_TIME_ZONE; do
+for p in INSTALL_PACKAGES DELETE_PACKAGES WRITE_SECURE_SETTINGS CHANGE_COMPONENT_ENABLED_STATE SET_TIME_ZONE; do
 	if grep -q "android.permission.$p: granted=true" <<<"$info"; then ok "permiso $p"; else bad "falta el permiso $p"; fi
 done
 if [ "$DEVICE_ADMIN" = 1 ]; then
