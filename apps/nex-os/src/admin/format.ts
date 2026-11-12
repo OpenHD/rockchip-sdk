@@ -44,6 +44,58 @@ export function formatUptime(seconds: number | undefined): string {
   return d > 0 ? `${d} d ${h} h` : `${h} h ${Math.floor((seconds % 3600) / 60)} min`;
 }
 
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const decimal = (n: number) => n.toFixed(1).replace('.', ',');
+
+/** Megabytes legibles: "412 MB", "1,9 GB". Sin dato: "—". */
+export function formatMb(mb: number | null | undefined): string {
+  if (!finite(mb) || mb < 0) return '—';
+  return mb >= 1024 ? `${decimal(mb / 1024)} GB` : `${Math.round(mb)} MB`;
+}
+
+/** "412 MB de 1,9 GB (21%)"; sin total, solo lo libre; sin nada, "—". */
+export function formatFreeOf(free: number | null | undefined, total: number | null | undefined): string {
+  if (!finite(free) || free < 0) return '—';
+  if (!finite(total) || total <= 0) return formatMb(free);
+  return `${formatMb(free)} de ${formatMb(total)} (${Math.round(Math.min(100, (free / total) * 100))}%)`;
+}
+
+export function formatTemp(c: number | null | undefined): string {
+  return finite(c) ? `${Math.round(c)} °C` : '—';
+}
+
+/** Latencia y pérdida de un tramo: "3 ms · 0% pérdida", "No responde", "—". */
+export function formatHop(ms: number | null | undefined, loss: number | null | undefined): string {
+  const parts = [finite(ms) && `${Math.round(ms)} ms`, finite(loss) && `${Math.round(loss)}% pérdida`].filter(Boolean);
+  if (parts.length === 0) return '—';
+  if (!finite(ms) && finite(loss) && loss >= 100) return 'No responde';
+  return parts.join(' · ');
+}
+
+/** Banda Wi-Fi a partir de la frecuencia del canal. */
+export function wifiBand(mhz: number | null | undefined): string | null {
+  if (!finite(mhz)) return null;
+  if (mhz >= 5925) return '6 GHz';
+  if (mhz >= 4900) return '5 GHz';
+  if (mhz >= 2400 && mhz < 2500) return '2,4 GHz';
+  return null;
+}
+
+/** "Wi-Fi 5 GHz", "Cable", "Sin red" o "—" si el equipo no lo informa. */
+export function formatConnection(t: string | null | undefined, mhz?: number | null): string {
+  if (t === 'wifi') return ['Wi-Fi', wifiBand(mhz)].filter(Boolean).join(' ');
+  if (t === 'eth') return 'Cable';
+  if (t === 'none') return 'Sin red';
+  return '—';
+}
+
+/** Señal Wi-Fi en palabras; los cortes coinciden con los de health.ts. */
+export function formatRssi(rssi: number | null | undefined): string {
+  if (!finite(rssi)) return '—';
+  const word = rssi <= -80 ? 'muy débil' : rssi <= -70 ? 'débil' : rssi <= -60 ? 'buena' : 'excelente';
+  return `${Math.round(rssi)} dBm (${word})`;
+}
+
 export function initials(name: string | null | undefined): string {
   const parts = (name ?? '?').replace(/[·|-]/g, ' ').trim().split(/\s+/);
   return ((parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '')).toUpperCase();
@@ -78,6 +130,12 @@ export const AUDIT_LABELS: Record<string, string> = {
   'company.create': 'Creó la empresa',
   'member.set': 'Cambió un miembro',
   'alerts.update': 'Configuró avisos',
+  'notice.create': 'Envió un comunicado',
+  'notice.cancel': 'Canceló un comunicado',
+  'device.net_diag': 'Pidió un diagnóstico de red',
+  'android_app.upsert': 'Cargó o actualizó una app Android',
+  'android_app.set': 'Habilitó o deshabilitó una app Android',
+  'android_app.delete': 'Quitó una app Android',
   'catalog.upsert': 'Editó el catálogo',
   'domain.classify': 'Clasificó un dominio',
   'device.unlock_code': 'Pidió un código de desbloqueo',

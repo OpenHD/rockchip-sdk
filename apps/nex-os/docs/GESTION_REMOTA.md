@@ -759,3 +759,80 @@ PG_BIN=/ruta/a/postgres/bin apps/nex-os/supabase/tests/run.sh   # o con psql/ini
 - `npm --prefix apps/nex-os test` (vitest, 42 pruebas): parseo defensivo del estado, apps deshabilitadas,
   atestación, datos de pago, URL de lanzamiento y relay.
 - `PG_BIN=... apps/nex-os/supabase/tests/run.sh` (SQL, 148 pruebas).
+
+## v12: apps del operador, comunicados, diagnóstico de red y salud
+
+Pedido por ISPs del piloto: cada operador sube la app que necesite (por ejemplo su app de TV), avisa a sus clientes
+de cortes o emergencias, y detecta equipos o redes con problemas antes del reclamo.
+
+### Apps Android del operador (NEX TV)
+
+En el panel, **Apps → Apps Android de tu empresa** (dueño o admin de la empresa, sin pasar por NEX):
+
+- **Desde Play Store**: se pega el link (`https://play.google.com/store/apps/details?id=…`) o el paquete. El TV muestra
+  un mosaico "Instalar" que abre la ficha en la Play Store; el cliente confirma ahí (Android no permite instalar de la
+  Play Store sin ese paso) y la Play Store necesita una cuenta de Google iniciada.
+- **Subir APK** (hasta 200 MB, pide 2FA reciente): el panel lee paquete, versionCode y sha256 del archivo y lo sube a
+  `mdm-apps/<empresa>/<uuid>.apk`. NEX TV lo descarga, verifica tamaño, sha256, paquete y versionCode, y lo instala
+  sin preguntar (app de sistema con `INSTALL_PACKAGES`). Para actualizar, se sube el APK nuevo con el mismo paquete y
+  un versionCode mayor. Si el ISP la quita o la deshabilita, NEX TV desinstala lo que instaló él (`DELETE_PACKAGES`).
+  Un fallo se reintenta cada 6 h y aparece en el historial del equipo ("No se pudo instalar una app del operador").
+- No se pueden cargar NEX, la Play Store ni sus servicios. Máximo 40 apps por empresa.
+
+### Comunicados
+
+**Comunicados** en el panel: cortes, clima, salud, municipales o generales, con severidad (info, importante,
+emergencia) y vigencia de hasta 31 días. Llegan a todos los TV de la empresa en el próximo sync (≤ 1 min). Las
+emergencias se muestran a pantalla completa; el resto, como aviso en el inicio. Cuando el cliente lo cierra, el TV lo
+informa y el panel muestra "visto por X de Y equipos". Máximo 30 por día por empresa.
+
+### Diagnóstico de red
+
+En el detalle del equipo, **Diagnosticar red**. El TV (si está en línea) mide en 15-25 s: tipo de conexión, señal y
+enlace Wi-Fi, ping al router/ONU (gateway) y a internet (1.1.1.1), DNS, tiempo al servidor de NEX y velocidad de
+bajada (hasta 25 MB u 8 s contra speed.cloudflare.com). El panel dice en qué tramo está el problema:
+
+| Resultado | Qué significa |
+|---|---|
+| Red de la casa | Falla el tramo TV box ↔ router/ONU: Wi-Fi débil o con interferencia, o el cable. |
+| Acceso a internet | El router responde bien pero internet no: ONU, enlace o red del ISP. |
+| La red está bien | Si una app de TV falla, el problema está en la app o en su servidor. |
+
+Máximo 6 diagnósticos por hora y equipo. Integrarse con el router u ONU del cliente (TR-069 o API del fabricante) no
+está hecho: por ahora el tramo local se mide con el ping al gateway.
+
+### Semáforo de salud (0-100)
+
+Cada sync el TV informa temperatura (si el kernel la expone), memoria, almacenamiento y una medición liviana de red
+(cada 5 min). El servidor suma encendidos, reinicios del agente y errores de las últimas 24 h
+(`mdm_device_health_inputs`). El panel calcula el puntaje en `src/admin/health.ts`: 100 menos penalidades
+(sin conexión, calor, poca memoria o disco, Wi-Fi débil, pérdida de paquetes, reinicios, errores). Verde ≥ 80,
+amarillo 50-79, rojo < 50. Lo que el equipo no informa no resta.
+
+### Despliegue
+
+1. Ejecutar `supabase/schema-mdm-v12.sql` (idempotente, después de v11) **antes** de publicar el panel nuevo: el
+   listado de equipos pide las columnas `diag_requested_at`, `net_diag` y `net_diag_at`.
+2. Publicar el panel.
+3. Publicar NEX TV con agente 3 (release Android). Los equipos con agentes viejos ignoran las claves nuevas.
+4. Volver a correr `install-system.sh` en los equipos ya instalados no hace falta para instalar APKs (ya tienen
+   `INSTALL_PACKAGES`); para desinstalar, verificar que el sistema conceda `DELETE_PACKAGES` (el script lo chequea).
+
+### Pruebas
+
+- SQL: `PG_BIN=… supabase/tests/run.sh` aplica v6 → v12 (v11 y v12 dos veces) y corre 207 pruebas.
+- Panel: `npx vitest run` (lector de APK con un APK mínimo compilado con aapt2, puntaje de salud y veredicto de red).
+- Falta probar en un TV box real: instalación y desinstalación silenciosa de un APK del ISP, `ping` sin root en el
+  firmware del TX6698, temperatura en `/sys/class/thermal`, y la prueba de velocidad.
+
+## v13: equipo comprometido en firmware de fábrica
+
+Los TV box HiSilicon "bigfish" del incidente de CAPPI subían 40-100 Mbps sin uso y traían de fábrica un shell root
+remoto (cmd_root en TCP/40000), ADB por red (TCP/5555), su con setuid y apps de control remoto (`com.example.himac`,
+`com.lz.sysplugin`); ver [CureBox](https://github.com/macch-ai/curebox), `docs/HANDOFF.md`.
+
+NEX TV (agente 3, `FactoryRisk.kt`) informa en health `up_mbps` (subida de 5 min sin contar a NEX) y `factory`
+(puertas abiertas), y manda `upload_anomaly` (más de 5 Mbps durante 15 min) y `factory_backdoor`. Los dos son
+categoría "Manipulación": llegan por Telegram/mail si la empresa tiene esas alertas. En el panel restan salud
+(35-50 y 25 puntos) y aparecen en el filtro "Con alertas". NEX solo informa: cerrar esos accesos requiere reparar el
+firmware (CureBox). Despliegue: correr `supabase/schema-mdm-v13.sql` (idempotente, después de v12).

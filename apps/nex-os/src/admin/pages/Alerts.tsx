@@ -3,7 +3,7 @@ import { Bell, Lock, LockOpen, Mail, Send, ShieldAlert, Skull, WifiOff, X, type 
 import { db, run, type AlertKind, type Company } from '../api';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
-import { Badge, Button, Card, ErrorText, Field, inputClass, PageHeader, Switch } from '../ui';
+import { Badge, Button, Card, ErrorText, Field, inputClass, PageHeader, Switch, SaveBar } from '../ui';
 
 const KINDS: { id: AlertKind; label: string; description: string; icon: LucideIcon }[] = [
   { id: 'tamper', label: 'Manipulación', description: 'Reloj atrasado, reflasheo, filtro caído o imagen no oficial.', icon: ShieldAlert },
@@ -29,15 +29,15 @@ function EmailChips({ value, onChange }: { value: string[]; onChange: (v: string
     }
   };
   return (
-    <div className={`${inputClass} flex min-h-10 flex-wrap items-center gap-1.5 py-1.5`}>
+    <div className={`${inputClass} flex flex-wrap items-center gap-1.5 py-1.5 focus-within:border-focus focus-within:ring-[3px] focus-within:ring-focus`}>
       {value.map((e) => (
-        <span key={e} className="inline-flex items-center gap-1 rounded-md bg-indigo-500/15 px-2 py-0.5 text-xs text-indigo-200">
+        <span key={e} className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-1 text-xs font-medium text-accent">
           {e}
-          <button type="button" aria-label={`Quitar ${e}`} onClick={() => onChange(value.filter((x) => x !== e))}><X className="h-3 w-3" /></button>
+          <button type="button" aria-label={`Quitar ${e}`} onClick={() => onChange(value.filter((x) => x !== e))} className="-mr-1 flex h-5 w-5 items-center justify-center rounded hover:bg-fill-2"><X className="h-3 w-3" aria-hidden /></button>
         </span>
       ))}
       {value.length < 5 && (
-        <input className="min-w-[10rem] flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500" placeholder={value.length ? '' : 'soporte@empresa.com'}
+        <input className="min-w-[10rem] flex-1 bg-transparent text-base text-fg outline-none placeholder:text-fg-4 sm:text-sm" aria-label="Agregar email" placeholder={value.length ? '' : 'soporte@empresa.com'}
           value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={add} />
       )}
     </div>
@@ -54,6 +54,13 @@ export default function AlertsPage({ company, onChanged }: { company: Company; o
   const [digest, setDigest] = useState(company.alert_digest);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const dirty =
+    chatId !== (company.alert_telegram_chat_id ?? '') ||
+    hours !== company.alert_offline_hours ||
+    digest !== company.alert_digest ||
+    emails.join(',') !== company.alert_emails.join(',') ||
+    [...kinds].sort().join(',') !== [...company.alert_kinds].sort().join(',');
 
   const guard = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -105,23 +112,23 @@ export default function AlertsPage({ company, onChanged }: { company: Company; o
         }
       />
       <ErrorText error={error} />
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="flex flex-col gap-6">
+      <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-2">
+        <div className="flex flex-col gap-4 lg:gap-5">
           <Card
-            title={<span className="flex items-center gap-2"><Send className="h-4 w-4 text-sky-300" aria-hidden /> Telegram</span>}
+            title={<span className="flex items-center gap-2"><Send className="h-4 w-4 text-accent" aria-hidden /> Telegram</span>}
             action={chatId ? <Badge tone="success">Conectado</Badge> : <Badge>Sin configurar</Badge>}
           >
-            <ol className="mb-4 flex flex-col gap-2 text-sm text-zinc-400">
-              <li><span className="mr-2 text-zinc-500">1.</span>Agregá el bot de NEX a tu grupo de Telegram.</li>
-              <li><span className="mr-2 text-zinc-500">2.</span>En el grupo escribí <code className="rounded bg-white/[0.08] px-1.5 py-0.5 text-zinc-200">/id</code>.</li>
-              <li><span className="mr-2 text-zinc-500">3.</span>Pegá acá el número que responde el bot.</li>
+            <ol className="mb-4 flex flex-col gap-2 text-sm text-fg-3">
+              <li><span className="mr-2 text-fg-4">1.</span>Agregá el bot de NEX a tu grupo de Telegram.</li>
+              <li><span className="mr-2 text-fg-4">2.</span>En el grupo escribí <code className="rounded bg-fill-2 px-1.5 py-0.5 text-fg-2">/id</code>.</li>
+              <li><span className="mr-2 text-fg-4">3.</span>Pegá acá el número que responde el bot.</li>
             </ol>
             <Field label="ID del chat">
               <input className={`${inputClass} font-mono`} placeholder="-1001234567890" value={chatId} onChange={(e) => setChatId(e.target.value.trim())} />
             </Field>
           </Card>
           <Card
-            title={<span className="flex items-center gap-2"><Mail className="h-4 w-4 text-indigo-300" aria-hidden /> Email</span>}
+            title={<span className="flex items-center gap-2"><Mail className="h-4 w-4 text-accent" aria-hidden /> Email</span>}
             action={emails.length ? <Badge tone="success">{emails.length} {emails.length === 1 ? 'destinatario' : 'destinatarios'}</Badge> : <Badge>Sin configurar</Badge>}
           >
             <Field label="Destinatarios (hasta 5)" hint="Enter o coma para agregar.">
@@ -131,15 +138,15 @@ export default function AlertsPage({ company, onChanged }: { company: Company; o
         </div>
 
         <Card title="Qué avisar">
-          <ul className="flex flex-col divide-y divide-white/[0.06]">
+          <ul className="flex flex-col divide-y divide-line">
             {KINDS.map((k) => (
               <li key={k.id} className="flex items-center gap-4 py-3.5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-zinc-300"><k.icon className="h-4 w-4" aria-hidden /></span>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fill text-fg-2"><k.icon className="h-4 w-4" aria-hidden /></span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-zinc-100">{k.label}</div>
-                  <div className="text-xs text-zinc-500">{k.description}</div>
+                  <div className="text-sm font-medium text-fg">{k.label}</div>
+                  <div className="text-xs text-fg-4">{k.description}</div>
                   {k.id === 'offline' && kinds.has('offline') && (
-                    <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+                    <label className="mt-2 flex items-center gap-2 text-xs text-fg-3">
                       Avisar después de
                       <input type="number" min={1} max={720} className={`${inputClass} h-8 w-20 py-1`} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
                       horas
@@ -150,16 +157,17 @@ export default function AlertsPage({ company, onChanged }: { company: Company; o
               </li>
             ))}
             <li className="flex items-center gap-4 py-3.5">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-zinc-300"><Bell className="h-4 w-4" aria-hidden /></span>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fill text-fg-2"><Bell className="h-4 w-4" aria-hidden /></span>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-zinc-100">Resumen diario de piratería</div>
-                <div className="text-xs text-zinc-500">Un mensaje por día con los intentos por equipo.</div>
+                <div className="text-sm font-medium text-fg">Resumen diario de piratería</div>
+                <div className="text-xs text-fg-4">Un mensaje por día con los intentos por equipo.</div>
               </div>
               <Switch checked={digest} onChange={setDigest} label="Resumen diario" />
             </li>
           </ul>
         </Card>
       </div>
+      <SaveBar show={dirty} busy={busy} onSave={save} />
     </>
   );
 }

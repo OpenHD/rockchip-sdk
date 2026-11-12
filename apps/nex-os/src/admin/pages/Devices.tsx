@@ -1,14 +1,14 @@
-import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Activity,
   Ban,
   CalendarPlus,
+  ChevronRight,
   CircleCheck,
   Copy,
   CreditCard,
   EllipsisVertical,
   HardDrive,
-  Hash,
   Hourglass,
   KeyRound,
   Lock,
@@ -16,7 +16,7 @@ import {
   Pencil,
   Plus,
   QrCode,
-  Search,
+  SearchX,
   ShieldAlert,
   ShieldCheck,
   Tv,
@@ -40,17 +40,21 @@ import {
   type StateLogEntry,
   type UnlockCode,
 } from '../api';
+import { HealthPill, HealthSection, NetDiagSection } from '../DeviceHealth';
+import { DEVICE_SORTS, matchesQuery, paginate, sortDevices, type DeviceSort } from '../deviceList';
 import { FILTERS, healthIssues, paymentText, SERVICE_STAGES, STATE_SOURCE_LABELS, STATUS_META, type Filter } from '../deviceMeta';
-import { addMonths, copyText, formatDate, formatUptime, LOCK_REASONS, relativeTime, RESTRICT_REASONS, todayIso } from '../format';
+import { addMonths, copyText, formatDate, LOCK_REASONS, relativeTime, RESTRICT_REASONS, todayIso } from '../format';
+import type { HealthInputs, HealthScore } from '../health';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
 import {
   Badge,
   Button,
-  Card,
+  Callout,
   Chip,
   Drawer,
   EmptyState,
+  ErrorState,
   ErrorText,
   Field,
   IconButton,
@@ -58,8 +62,13 @@ import {
   Menu,
   Modal,
   PageHeader,
+  Pagination,
+  SearchInput,
+  SectionTitle,
   Skeleton,
   StatusDot,
+  Tabs,
+  type Tone,
 } from '../ui';
 import type { CompanyData } from '../useCompanyData';
 
@@ -132,7 +141,7 @@ function LockModal({ device, company, onClose, onDone }: { device: Device; compa
     >
       <div className="flex flex-col gap-4">
         <div>
-          <div className="mb-2 text-xs font-medium text-zinc-300">Motivo</div>
+          <div className="mb-2 text-[13px] font-medium text-fg-2">Motivo</div>
           <div className="flex flex-wrap gap-2">
             {[...LOCK_REASONS, 'Otro'].map((r) => (
               <Chip key={r} active={reason === r} onClick={() => setReason(r)}>{r}</Chip>
@@ -144,13 +153,13 @@ function LockModal({ device, company, onClose, onDone }: { device: Device; compa
             <input autoFocus className={inputClass} maxLength={280} value={custom} onChange={(e) => setCustom(e.target.value)} />
           </Field>
         )}
-        <div className="rounded-xl border border-white/[0.07] bg-black/30 p-4">
-          <div className="mb-2 text-[11px] uppercase tracking-wider text-zinc-500">Así lo verá el cliente en el TV</div>
-          <div className="text-sm font-medium text-white">🔒 Equipo bloqueado</div>
-          <div className="mt-1 text-sm text-zinc-300">{company.lock_message}</div>
-          {finalReason && <div className="mt-1 text-xs text-zinc-500">{finalReason}</div>}
+        <div className="rounded-xl border border-line bg-inset p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-4">Así lo verá el cliente en el TV</div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-fg"><Lock className="h-4 w-4" aria-hidden /> Equipo bloqueado</div>
+          <div className="mt-1 text-sm text-fg-2">{company.lock_message}</div>
+          {finalReason && <div className="mt-1 text-xs text-fg-4">{finalReason}</div>}
         </div>
-        <p className="text-xs text-zinc-500">El TV aplica el bloqueo en menos de un minuto y corta lo que se esté reproduciendo.</p>
+        <p className="text-xs text-fg-4">El TV aplica el bloqueo en menos de un minuto y corta lo que se esté reproduciendo.</p>
         <ErrorText error={error} />
       </div>
     </Modal>
@@ -181,12 +190,12 @@ function RestrictModal({ device, company, onClose, onDone }: { device: Device; c
       }
     >
       <div className="flex flex-col gap-4">
-        <p className="text-sm text-zinc-300">
+        <p className="text-sm text-fg-2">
           Paso intermedio antes del bloqueo: el menú, la pantalla de pago y la configuración de red siguen funcionando, pero
           las apps quedan deshabilitadas.
         </p>
         <div>
-          <div className="mb-2 text-xs font-medium text-zinc-300">Motivo</div>
+          <div className="mb-2 text-[13px] font-medium text-fg-2">Motivo</div>
           <div className="flex flex-wrap gap-2">
             {[...RESTRICT_REASONS, 'Otro'].map((r) => (
               <Chip key={r} active={reason === r} onClick={() => setReason(r)}>{r}</Chip>
@@ -198,13 +207,13 @@ function RestrictModal({ device, company, onClose, onDone }: { device: Device; c
             <input autoFocus className={inputClass} maxLength={280} value={custom} onChange={(e) => setCustom(e.target.value)} />
           </Field>
         )}
-        <div className="rounded-xl border border-white/[0.07] bg-black/30 p-4">
-          <div className="mb-2 text-[11px] uppercase tracking-wider text-zinc-500">Así lo verá el cliente en el TV</div>
-          <div className="text-sm font-medium text-white">Apps deshabilitadas</div>
-          <div className="mt-1 text-sm text-zinc-300">{company.payment_message}</div>
-          {finalReason && <div className="mt-1 text-xs text-zinc-500">{finalReason}</div>}
+        <div className="rounded-xl border border-line bg-inset p-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-4">Así lo verá el cliente en el TV</div>
+          <div className="text-sm font-medium text-fg">Apps deshabilitadas</div>
+          <div className="mt-1 text-sm text-fg-2">{company.payment_message}</div>
+          {finalReason && <div className="mt-1 text-xs text-fg-4">{finalReason}</div>}
           {(company.payment_phone || company.payment_url) && (
-            <div className="mt-2 text-xs text-zinc-400">
+            <div className="mt-2 text-xs text-fg-3">
               {company.payment_phone && <span>Tel. {company.payment_phone}</span>}
               {company.payment_phone && company.payment_url && ' · '}
               {company.payment_url && <span>QR de pago</span>}
@@ -246,8 +255,8 @@ function PaymentModal({ device, company, onClose, onDone }: { device: Device; co
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="text-sm text-zinc-400">
-          Pagado hasta ahora: <span className="text-zinc-200">{device.paid_until ? formatDate(device.paid_until) : 'sin control'}</span>
+        <div className="text-sm text-fg-3">
+          Pagado hasta ahora: <span className="text-fg-2">{device.paid_until ? formatDate(device.paid_until) : 'sin control'}</span>
         </div>
         <div className="grid grid-cols-3 gap-2">
           {[1, 3, 6].map((m) => {
@@ -256,12 +265,14 @@ function PaymentModal({ device, company, onClose, onDone }: { device: Device; co
               <button
                 key={m}
                 onClick={() => setDate(value)}
-                className={`rounded-xl border px-3 py-3 text-left transition ${
-                  date === value ? 'border-indigo-400/60 bg-indigo-500/15' : 'border-white/10 hover:border-white/20'
+                type="button"
+                aria-pressed={date === value}
+                className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                  date === value ? 'border-accent bg-accent-soft' : 'border-line-strong hover:bg-fill'
                 }`}
               >
-                <div className="text-sm font-semibold text-white">+{m} {m === 1 ? 'mes' : 'meses'}</div>
-                <div className="text-xs text-zinc-400">{formatDate(value)}</div>
+                <div className="text-sm font-semibold text-fg">+{m} {m === 1 ? 'mes' : 'meses'}</div>
+                <div className="text-xs text-fg-3">{formatDate(value)}</div>
               </button>
             );
           })}
@@ -272,11 +283,7 @@ function PaymentModal({ device, company, onClose, onDone }: { device: Device; co
         <Field label="Nota (opcional)" hint="Ej. número de comprobante. Queda en el historial de pagos.">
           <input className={inputClass} maxLength={280} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
-        {wasOverdue && (
-          <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
-            <LockOpen className="h-4 w-4" aria-hidden /> El equipo se desbloquea solo en el próximo minuto.
-          </div>
-        )}
+        {wasOverdue && <Callout tone="success" icon={LockOpen}>El equipo se desbloquea solo en el próximo minuto.</Callout>}
         <ErrorText error={error} />
       </div>
     </Modal>
@@ -332,7 +339,7 @@ function UnpairModal({ device, onClose, onDone }: { device: Device; onClose: () 
         </>
       }
     >
-      <div className="flex flex-col gap-4 text-sm text-zinc-300">
+      <div className="flex flex-col gap-4 text-sm text-fg-2">
         <p>
           El equipo deja de pertenecer a la empresa, pierde su configuración y vuelve a la pantalla de vinculación.
           Se borra su historial de eventos y de pagos.
@@ -374,7 +381,7 @@ function ExternalRefModal({ device, onClose, onDone }: { device: Device; onClose
             onChange={(e) => setRef(e.target.value)}
           />
         </Field>
-        {!valid && <p className="text-xs text-rose-300">Solo letras, números y . _ : @ - (empezando por letra o número, hasta 64).</p>}
+        {!valid && <p role="alert" className="text-xs text-danger">Solo letras, números y . _ : @ - (empezando por letra o número, hasta 64).</p>}
         <ErrorText error={error} />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>Cancelar</Button>
@@ -402,13 +409,13 @@ function UnlockCodeModal({ device, result, onClose }: { device: Device; result: 
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="rounded-2xl border border-indigo-500/25 bg-indigo-500/[0.07] py-6 text-center font-mono text-5xl font-semibold tracking-[0.15em] text-white tabular-nums">
+        <div className="rounded-2xl border border-accent bg-accent-soft py-6 text-center font-mono text-4xl font-semibold tracking-[0.15em] text-fg tabular-nums sm:text-5xl">
           {pretty}
         </div>
-        <ul className="flex flex-col gap-1.5 text-sm text-zinc-300">
+        <ul className="flex flex-col gap-1.5 text-sm text-fg-2">
           <li>Válido el {formatDate(result.valid_on)} (UTC) y hasta el día siguiente.</li>
           <li>Desbloquea el equipo por {result.hours ?? 72} h, aunque no tenga internet.</li>
-          <li className="text-zinc-500">
+          <li className="text-fg-4">
             Dictáselo al cliente: en el TV bloqueado elige "Tengo un código de desbloqueo" y lo ingresa con el control. Queda registrado en la auditoría.
           </li>
         </ul>
@@ -436,10 +443,7 @@ export function ClaimModal({ company, initialCode, onClose, onDone }: { company:
   return (
     <Modal title="Vincular equipo" description={`Se agrega a ${company.name}`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-5">
-        <div className="flex items-center gap-3 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.07] p-3 text-sm text-indigo-200">
-          <QrCode className="h-5 w-5 shrink-0" aria-hidden />
-          Encendé el TV box: muestra un QR y un código. Escaneá el QR con este celular o escribí el código.
-        </div>
+        <Callout tone="info" icon={QrCode}>Encendé el TV box: muestra un QR y un código. Escaneá el QR con este celular o escribí el código.</Callout>
         <Field label="Código del TV">
           <input
             autoFocus={!initialCode}
@@ -469,48 +473,47 @@ export function ClaimModal({ company, initialCode, onClose, onDone }: { company:
 function HealthRow({ ok, label, detail }: { ok: boolean | undefined; label: string; detail?: string }) {
   const known = ok !== undefined;
   return (
-    <div className="flex items-center justify-between py-2.5">
-      <span className="flex items-center gap-2.5 text-sm text-zinc-300">
-        {known && ok ? <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden /> : known ? <ShieldAlert className="h-4 w-4 text-rose-400" aria-hidden /> : <Activity className="h-4 w-4 text-zinc-500" aria-hidden />}
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <span className="flex min-w-0 items-center gap-2.5 text-sm text-fg-2">
+        {known && ok ? <ShieldCheck className="h-4 w-4 shrink-0 text-ok" aria-hidden /> : known ? <ShieldAlert className="h-4 w-4 shrink-0 text-danger" aria-hidden /> : <Activity className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />}
         {label}
       </span>
-      <span className={`text-xs ${known ? (ok ? 'text-emerald-300' : 'text-rose-300') : 'text-zinc-500'}`}>{detail ?? (known ? (ok ? 'OK' : 'Falla') : 'Sin datos')}</span>
+      <span className={`shrink-0 text-right text-[13px] ${known ? (ok ? 'text-ok' : 'font-medium text-danger') : 'text-fg-4'}`}>{detail ?? (known ? (ok ? 'OK' : 'Falla') : 'Sin datos')}</span>
     </div>
   );
 }
 
 const STAGE_ACTIVE: Record<string, string> = {
-  success: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
-  warning: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
-  danger: 'bg-rose-500/15 text-rose-300 ring-rose-500/30',
+  success: 'bg-ok-soft text-ok ring-ok',
+  warning: 'bg-warn-soft text-warn ring-warn',
+  danger: 'bg-danger-soft text-danger ring-danger',
 };
 
 /** Activo → Aviso → Restringido → Bloqueado, con la etapa actual resaltada. */
 function ServiceStages({ state }: { state: ServiceState }) {
+  const at = SERVICE_STAGES.findIndex((s) => s.id === state);
   return (
-    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]" aria-label="Estado del servicio">
+    <ol className="grid grid-cols-4 gap-1" aria-label="Estado del servicio">
       {SERVICE_STAGES.map((s, i) => (
-        <Fragment key={s.id}>
-          {i > 0 && <span className="h-px w-3 shrink-0 bg-white/15" />}
-          <span
-            aria-current={s.id === state ? 'step' : undefined}
-            className={`whitespace-nowrap rounded-full px-2.5 py-1 ring-1 ring-inset ${
-              s.id === state ? `${STAGE_ACTIVE[s.tone]} font-semibold` : 'bg-white/[0.03] text-zinc-500 ring-white/[0.06]'
-            }`}
-          >
-            {s.label}
-          </span>
-        </Fragment>
+        <li
+          key={s.id}
+          aria-current={s.id === state ? 'step' : undefined}
+          className={`flex h-8 items-center justify-center rounded-md px-1 text-center text-xs ring-1 ring-inset ${
+            s.id === state ? `${STAGE_ACTIVE[s.tone]} font-semibold` : i < at ? 'bg-fill text-fg-3 ring-line' : 'text-fg-4 ring-line'
+          }`}
+        >
+          <span className="truncate">{s.label}</span>
+        </li>
       ))}
-    </div>
+    </ol>
   );
 }
 
 const STATE_DOT: Record<ServiceState, string> = {
-  active: 'bg-emerald-400',
-  warning: 'bg-amber-400',
-  restricted: 'bg-amber-500',
-  locked: 'bg-rose-400',
+  active: 'bg-ok',
+  warning: 'bg-warn',
+  restricted: 'bg-warn',
+  locked: 'bg-danger',
 };
 
 function stateChangeText(e: StateLogEntry): string {
@@ -554,10 +557,40 @@ function useStateLog(deviceId: string, version: string) {
   return { rows, error };
 }
 
+/** Renglón de una línea de tiempo: punto de color, título y detalle. */
+function TimelineItem({ dot, title, detail }: { dot: string; title: ReactNode; detail: ReactNode }) {
+  return (
+    <li className="relative pb-4 pl-6 last:pb-0">
+      <span className="absolute bottom-0 left-[4.5px] top-2 w-px bg-fill-2 [li:last-child>&]:hidden" aria-hidden />
+      <span className={`absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-[var(--surface)] ${dot}`} aria-hidden />
+      <div className="text-sm text-fg">{title}</div>
+      <div className="text-xs text-fg-4">{detail}</div>
+    </li>
+  );
+}
+
+/** Renglón "etiqueta — valor" de la ficha del equipo. */
+function InfoRow({ label, children, action }: { label: string; children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="flex min-h-[2.75rem] items-center justify-between gap-3 py-1.5">
+      <dt className="shrink-0 text-sm text-fg-3">{label}</dt>
+      <dd className="flex min-w-0 items-center gap-1 text-right text-sm text-fg">
+        <span className="min-w-0 break-words">{children}</span>
+        {action}
+      </dd>
+    </div>
+  );
+}
+
+type DrawerTab = 'resumen' | 'salud' | 'historial';
+
 function DeviceDrawer({
   device,
   company,
   events,
+  score,
+  inputs,
+  now,
   onClose,
   onAction,
   onChanged,
@@ -565,21 +598,28 @@ function DeviceDrawer({
   device: Device;
   company: Company;
   events: DeviceEvent[];
+  score: HealthScore | undefined;
+  inputs: HealthInputs | undefined;
+  /** Momento de la última carga de datos: contra eso se calcula si el diagnóstico sigue pendiente. */
+  now: number;
   onClose: () => void;
   onAction: (d: Dialog) => void;
   onChanged: () => void;
 }) {
   const toast = useToast();
+  const [tab, setTab] = useState<DrawerTab>('resumen');
   const status = deviceStatus(device, company);
   const meta = STATUS_META[status];
   const applied = enforcement(device, company);
   const online = isOnline(device);
   const pay = paymentText(device, company);
   const h = device.health ?? {};
+  const issues = healthIssues(device);
   const history = events.filter((e) => e.device_id === device.id).slice(0, 30);
   const state = serviceState(device, company);
   const rDay = restrictDay(device, company);
   const stateLog = useStateLog(device.id, [device.locked, device.restricted, device.paid_until, device.reported_mode].join('|'));
+  const healthDot: Tone | undefined = issues.length > 0 || score?.band === 'problemas' ? 'danger' : score?.band === 'atencion' ? 'warning' : undefined;
 
   const unrestrict = async () => {
     try {
@@ -618,140 +658,190 @@ function DeviceDrawer({
       title={device.name ?? 'Equipo sin nombre'}
       subtitle={<span className="font-mono">{device.id.slice(0, 8)} · {device.firmware_version ?? 'firmware desconocido'}</span>}
       onClose={onClose}
-    >
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={meta.tone} icon={meta.icon}>{meta.label}</Badge>
-          {applied === 'pendiente' && <Badge tone="warning" icon={Hourglass}>Pendiente de aplicar</Badge>}
-          {applied === 'confirmado' && device.reported_mode === 'locked' && <Badge tone="success" icon={CircleCheck}>Bloqueo confirmado</Badge>}
-          {applied === 'confirmado' && device.reported_mode === 'restricted' && <Badge tone="success" icon={CircleCheck}>Restricción confirmada</Badge>}
-          <span className="ml-auto flex items-center gap-2 text-xs text-zinc-400">
-            <StatusDot online={online} /> {online ? 'En línea' : `Visto ${relativeTime(device.last_seen_at)}`}
-          </span>
-        </div>
-
-        {device.locked && device.lock_reason && (
-          <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.07] px-4 py-3 text-sm text-rose-200">
-            Motivo del bloqueo: {device.lock_reason}
-          </div>
-        )}
-        {device.restricted && (
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-4 py-3 text-sm text-amber-200">
-            Restringido a mano{device.restrict_reason ? `: ${device.restrict_reason}` : ''}
-          </div>
-        )}
-
-        <section>
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Estado del servicio</h3>
-          <ServiceStages state={state} />
-          {rDay && !device.locked && state !== 'locked' && (
-            <p className="mt-1.5 text-xs text-zinc-500">Si no paga, se restringe el {formatDate(rDay)}.</p>
-          )}
-        </section>
-
-        <div className="grid grid-cols-2 gap-2">
-          {device.locked ? (
-            <Button variant="success" icon={LockOpen} onClick={unlock}>Desbloquear</Button>
-          ) : (
-            <Button variant="danger" icon={Lock} onClick={() => onAction({ kind: 'lock', device })}>Bloquear</Button>
-          )}
-          <Button variant="secondary" icon={CreditCard} onClick={() => onAction({ kind: 'payment', device })}>Registrar pago</Button>
-          {device.restricted ? (
-            <Button variant="secondary" icon={CircleCheck} onClick={unrestrict}>Quitar restricción</Button>
-          ) : (
-            <Button variant="secondary" icon={Ban} onClick={() => onAction({ kind: 'restrict', device })}>Restringir</Button>
-          )}
-          <Button variant="secondary" icon={KeyRound} disabled={codeBusy} onClick={unlockCode}>
-            Código de desbloqueo
-          </Button>
-        </div>
-        <p className="-mt-4 text-xs text-zinc-500">
-          Para un equipo bloqueado o restringido sin internet: el cliente ingresa el código en el TV y queda activo por 72 h.
-        </p>
-
-        <section>
-          <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">N.º de cliente (ISP)</h3>
-          <div className="flex items-center justify-between rounded-xl border border-white/[0.07] px-4 py-2">
-            <span className={`flex items-center gap-2 text-sm ${device.external_ref ? 'font-mono text-zinc-100' : 'text-zinc-500'}`}>
-              <Hash className="h-4 w-4 text-zinc-500" aria-hidden />
-              {device.external_ref ?? 'Sin asignar'}
+      header={
+        <>
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 sm:px-6">
+            <Badge tone={meta.tone} icon={meta.icon}>{meta.label}</Badge>
+            {applied === 'pendiente' && <Badge tone="warning" icon={Hourglass}>Pendiente de aplicar</Badge>}
+            {applied === 'confirmado' && device.reported_mode === 'locked' && <Badge tone="success" icon={CircleCheck}>Bloqueo confirmado</Badge>}
+            {applied === 'confirmado' && device.reported_mode === 'restricted' && <Badge tone="success" icon={CircleCheck}>Restricción confirmada</Badge>}
+            <span className="ml-auto flex items-center gap-2 text-[13px] text-fg-3">
+              <StatusDot online={online} /> {online ? 'En línea' : `Visto ${relativeTime(device.last_seen_at)}`}
             </span>
-            <IconButton icon={Pencil} label="Editar n.º de cliente" onClick={() => onAction({ kind: 'external-ref', device })} />
           </div>
-        </section>
-
-        <section>
-          <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Pago</h3>
-          <div className="flex items-center justify-between rounded-xl border border-white/[0.07] px-4 py-3">
-            <span className={`text-sm ${pay.tone}`}>{pay.text}</span>
-            {device.paid_until && <span className="text-xs text-zinc-500">{formatDate(device.paid_until)}</span>}
-          </div>
-        </section>
-
-        <section>
-          <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Seguridad y salud</h3>
-          <div className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.07] px-4">
-            <HealthRow ok={h.hardened} label="Modo TV cerrado" />
-            <HealthRow ok={h.dns_filter} label="Filtro DNS anti-piratería" />
-            <HealthRow ok={h.firewall} label="Firewall" />
-            <HealthRow ok={undefined} label="Encendido hace" detail={formatUptime(h.uptime)} />
-            <HealthRow ok={undefined} label="Espacio libre" detail={h.free_mb ? `${(h.free_mb / 1024).toFixed(1)} GB` : '—'} />
-          </div>
-        </section>
-
-        <section>
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Cambios de estado</h3>
-          <ErrorText error={stateLog.error} />
-          {!stateLog.rows ? (
-            !stateLog.error && <Skeleton className="h-10" />
-          ) : stateLog.rows.length === 0 ? (
-            <p className="text-sm text-zinc-500">Sin cambios registrados.</p>
+          <Tabs
+            idBase="equipo"
+            label="Secciones del equipo"
+            value={tab}
+            onChange={setTab}
+            className="px-4 sm:px-6"
+            tabs={[
+              { id: 'resumen', label: 'Servicio' },
+              { id: 'salud', label: 'Salud y red', dot: healthDot },
+              { id: 'historial', label: 'Historial' },
+            ]}
+          />
+        </>
+      }
+      footer={
+        <div className="flex gap-2">
+          {device.locked ? (
+            <Button variant="success" icon={LockOpen} className="flex-1" onClick={unlock}>Desbloquear</Button>
           ) : (
-            <ol className="relative ml-2 border-l border-white/10">
-              {stateLog.rows.map((e) => (
-                <li key={e.id} className="mb-3 ml-4">
-                  <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ${STATE_DOT[e.state] ?? 'bg-zinc-500'}`} />
-                  <div className="text-sm text-zinc-200">
-                    {SERVICE_STAGES.find((s) => s.id === e.state)?.label ?? e.state}
-                    <span className="text-zinc-500"> · {stateChangeText(e)}</span>
-                  </div>
-                  <div className="text-xs text-zinc-500">
-                    {relativeTime(e.at)} · {STATE_SOURCE_LABELS[e.source] ?? e.source}
-                    {e.source === 'api' && typeof e.details.actor === 'string' && ` (${e.details.actor.replace(/^api:/, '')})`}
-                    {typeof e.details.reason === 'string' && ` · ${e.details.reason}`}
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <Button variant="danger" icon={Lock} className="flex-1" onClick={() => onAction({ kind: 'lock', device })}>Bloquear</Button>
           )}
-        </section>
+          <Button variant="secondary" icon={CreditCard} className="flex-1" onClick={() => onAction({ kind: 'payment', device })}>Registrar pago</Button>
+        </div>
+      }
+    >
+      <div role="tabpanel" id={`equipo-panel-${tab}`} aria-labelledby={`equipo-tab-${tab}`} className="flex flex-col gap-6">
+        {tab === 'resumen' && (
+          <>
+            {device.locked && device.lock_reason && (
+              <Callout tone="danger" icon={Lock} title="Bloqueado a mano">Motivo: {device.lock_reason}</Callout>
+            )}
+            {device.restricted && (
+              <Callout tone="warning" icon={Ban} title="Restringido a mano">{device.restrict_reason ? `Motivo: ${device.restrict_reason}` : 'Sin motivo cargado.'}</Callout>
+            )}
 
-        <section>
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">Historial (7 días)</h3>
-          {history.length === 0 ? (
-            <p className="text-sm text-zinc-500">Sin eventos.</p>
-          ) : (
-            <ol className="relative ml-2 border-l border-white/10">
-              {history.map((e) => (
-                <li key={e.id} className="mb-3 ml-4">
-                  <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ${e.severity === 'critical' ? 'bg-rose-400' : e.severity === 'warning' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
-                  <div className="text-sm text-zinc-200">{EVENT_LABELS[e.kind] ?? e.kind}</div>
-                  <div className="text-xs text-zinc-500">
-                    {relativeTime(e.created_at)}
-                    {typeof e.details.domain === 'string' && ` · ${e.details.domain}`}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
+            <section>
+              <SectionTitle>Estado del servicio</SectionTitle>
+              <ServiceStages state={state} />
+              {rDay && !device.locked && state !== 'locked' && (
+                <p className="mt-2 text-xs text-fg-4">Si no paga, se restringe el {formatDate(rDay)}.</p>
+              )}
+            </section>
 
-        <section className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
-          <Button variant="ghost" size="sm" icon={Pencil} onClick={() => onAction({ kind: 'rename', device })}>Renombrar</Button>
-          <Button variant="ghost" size="sm" icon={Unlink} className="text-rose-300 hover:text-rose-200" onClick={() => onAction({ kind: 'unpair', device })}>
-            Desvincular
-          </Button>
-        </section>
+            <section>
+              <SectionTitle>Cliente y pago</SectionTitle>
+              <dl className="divide-y divide-line rounded-xl border border-line px-4">
+                <InfoRow label="Pago"><span className={pay.tone}>{pay.text}</span></InfoRow>
+                <InfoRow
+                  label="N.º de cliente"
+                  action={<IconButton icon={Pencil} label="Editar n.º de cliente" className="-mr-2" onClick={() => onAction({ kind: 'external-ref', device })} />}
+                >
+                  {device.external_ref ? <span className="font-mono text-[13px]">{device.external_ref}</span> : <span className="text-fg-4">Sin asignar</span>}
+                </InfoRow>
+                <InfoRow
+                  label="Nombre"
+                  action={<IconButton icon={Pencil} label="Renombrar equipo" className="-mr-2" onClick={() => onAction({ kind: 'rename', device })} />}
+                >
+                  {device.name ?? <span className="text-fg-4">Sin nombre</span>}
+                </InfoRow>
+              </dl>
+            </section>
+
+            <section>
+              <SectionTitle>Otras acciones</SectionTitle>
+              <div className="grid gap-2 min-[440px]:grid-cols-2">
+                {device.restricted ? (
+                  <Button variant="secondary" icon={CircleCheck} onClick={unrestrict}>Quitar restricción</Button>
+                ) : (
+                  <Button variant="secondary" icon={Ban} onClick={() => onAction({ kind: 'restrict', device })}>Restringir</Button>
+                )}
+                <Button variant="secondary" icon={KeyRound} loading={codeBusy} onClick={unlockCode}>Código de desbloqueo</Button>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-fg-4">
+                Restringir deja el menú y la pantalla de pago, sin apps. El código es para un equipo bloqueado o restringido sin
+                internet: el cliente lo ingresa en el TV y queda activo por 72 h.
+              </p>
+            </section>
+
+            <section className="border-t border-line pt-4">
+              <Button variant="ghost" size="sm" icon={Unlink} className="-ml-2 text-danger hover:bg-danger-soft hover:text-danger" onClick={() => onAction({ kind: 'unpair', device })}>
+                Desvincular equipo
+              </Button>
+            </section>
+          </>
+        )}
+
+        {tab === 'salud' && (
+          <>
+            {issues.length > 0 && (
+              <Callout tone="danger" icon={ShieldAlert} title={issues.length === 1 ? 'Alerta de seguridad' : `${issues.length} alertas de seguridad`}>
+                <ul className={issues.length > 1 ? 'list-disc pl-4' : ''}>{issues.map((i) => <li key={i}>{i}</li>)}</ul>
+              </Callout>
+            )}
+
+            <HealthSection device={device} score={score} inputs={inputs} />
+
+            <NetDiagSection device={device} now={now} onRefresh={onChanged} />
+
+            <section>
+              <SectionTitle>Seguridad</SectionTitle>
+              <div className="divide-y divide-line rounded-xl border border-line px-4">
+                <HealthRow ok={h.hardened} label="Modo TV cerrado" />
+                {h.platform === 'android' ? (
+                  <>
+                    <HealthRow ok={h.webview_filter} label="Filtro anti-piratería en apps de NEX TV" />
+                    {/* Chrome y las apps de la Play Store navegan sin filtro: Android no permite DNS ni firewall de sistema. */}
+                    <HealthRow ok={undefined} label="Filtro en Chrome y apps de Play Store" detail="No disponible en Android" />
+                    {h.version && <HealthRow ok={undefined} label="Versión de NEX TV" detail={`${h.version} (build ${h.build ?? '—'})`} />}
+                  </>
+                ) : (
+                  <>
+                    <HealthRow ok={h.dns_filter} label="Filtro DNS anti-piratería" />
+                    <HealthRow ok={h.firewall} label="Firewall" />
+                  </>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tab === 'historial' && (
+          <>
+            <section>
+              <SectionTitle>Cambios de estado</SectionTitle>
+              <ErrorText error={stateLog.error} />
+              {!stateLog.rows ? (
+                !stateLog.error && <Skeleton className="h-16" />
+              ) : stateLog.rows.length === 0 ? (
+                <p className="text-sm text-fg-4">Sin cambios registrados.</p>
+              ) : (
+                <ol>
+                  {stateLog.rows.map((e) => (
+                    <TimelineItem
+                      key={e.id}
+                      dot={STATE_DOT[e.state] ?? 'bg-neutral'}
+                      title={<>{SERVICE_STAGES.find((s) => s.id === e.state)?.label ?? e.state}<span className="text-fg-3"> · {stateChangeText(e)}</span></>}
+                      detail={
+                        <>
+                          <span title={new Date(e.at).toLocaleString('es-AR')}>{relativeTime(e.at)}</span> · {STATE_SOURCE_LABELS[e.source] ?? e.source}
+                          {e.source === 'api' && typeof e.details.actor === 'string' && ` (${e.details.actor.replace(/^api:/, '')})`}
+                          {typeof e.details.reason === 'string' && ` · ${e.details.reason}`}
+                        </>
+                      }
+                    />
+                  ))}
+                </ol>
+              )}
+            </section>
+
+            <section>
+              <SectionTitle>Eventos (7 días)</SectionTitle>
+              {history.length === 0 ? (
+                <p className="text-sm text-fg-4">Sin eventos.</p>
+              ) : (
+                <ol>
+                  {history.map((e) => (
+                    <TimelineItem
+                      key={e.id}
+                      dot={e.severity === 'critical' ? 'bg-danger' : e.severity === 'warning' ? 'bg-warn' : 'bg-neutral'}
+                      title={EVENT_LABELS[e.kind] ?? e.kind}
+                      detail={
+                        <>
+                          <span title={new Date(e.created_at).toLocaleString('es-AR')}>{relativeTime(e.created_at)}</span>
+                          {typeof e.details.domain === 'string' && <> · <span className="font-mono">{e.details.domain}</span></>}
+                        </>
+                      }
+                    />
+                  ))}
+                </ol>
+              )}
+            </section>
+          </>
+        )}
       </div>
     </Drawer>
   );
@@ -779,22 +869,34 @@ export default function DevicesPage({
   const toast = useToast();
   const [filter, setFilter] = useState<Filter>(FILTERS.some((f) => f.id === initialFilter) ? (initialFilter as Filter) : 'todos');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<DeviceSort>('nombre');
+  const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<Dialog | null>(initialClaim ? { kind: 'claim', code: initialClaim } : null);
   const devices = useMemo(() => data.devices ?? [], [data.devices]);
 
+  const filterCtx = useMemo(() => ({ health: data.health }), [data.health]);
+
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((f) => [f.id, devices.filter((d) => f.test(d, company)).length])),
-    [devices, company],
+    () => Object.fromEntries(FILTERS.map((f) => [f.id, devices.filter((d) => f.test(d, company, filterCtx)).length])),
+    [devices, company, filterCtx],
   );
-  const shown = devices.filter((d) => {
+  const matching = useMemo(() => {
     const f = FILTERS.find((x) => x.id === filter)!;
-    const q = query.trim().toLowerCase();
-    return (
-      f.test(d, company) &&
-      (!q || (d.name ?? '').toLowerCase().includes(q) || d.id.startsWith(q) || (d.external_ref ?? '').toLowerCase().includes(q))
-    );
-  });
+    return sortDevices(devices.filter((d) => f.test(d, company, filterCtx) && matchesQuery(d, query)), sort, company, data.health);
+  }, [devices, filter, query, sort, company, filterCtx, data.health]);
+  const view = paginate(matching, page);
+  const shown = view.items;
   const selected = devices.find((d) => d.id === selectedId) ?? null;
+  const narrowed = filter !== 'todos' || query.trim() !== '';
+  const clear = () => {
+    setFilter('todos');
+    setQuery('');
+    setPage(1);
+  };
+  const goPage = (p: number) => {
+    setPage(p);
+    document.getElementById('equipos-listado')?.scrollIntoView({ block: 'start' });
+  };
 
   const quickUnlock = async (d: Device) => {
     try {
@@ -816,48 +918,89 @@ export default function DevicesPage({
     }
   };
 
+  const th = 'sticky top-0 z-10 border-b border-line bg-surface-2 py-2.5 text-left text-xs font-medium text-fg-3';
+
   return (
     <>
       <PageHeader
         title="Equipos"
-        subtitle={data.devices ? `${devices.length} equipos vinculados a ${company.name}` : 'Cargando…'}
+        subtitle={data.devices ? `${devices.length} ${devices.length === 1 ? 'equipo vinculado' : 'equipos vinculados'} a ${company.name}` : 'Cargando…'}
         actions={<Button icon={Plus} onClick={() => setDialog({ kind: 'claim' })}>Vincular equipo</Button>}
       />
 
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="relative w-full lg:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
-          <input className={`${inputClass} pl-9`} placeholder="Buscar por nombre, ID o n.º de cliente…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {FILTERS.map((f) => (
-            <Chip key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)} count={counts[f.id]}>{f.label}</Chip>
-          ))}
-        </div>
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <SearchInput
+          className="w-full sm:max-w-sm sm:flex-1"
+          placeholder="Buscar por nombre, ID o n.º de cliente"
+          value={query}
+          onChange={(v) => {
+            setQuery(v);
+            setPage(1);
+          }}
+        />
+        <label className="flex items-center gap-2 sm:ml-auto">
+          <span className="shrink-0 text-[13px] text-fg-3">Ordenar</span>
+          <select
+            className={`${inputClass} sm:w-auto`}
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value as DeviceSort);
+              setPage(1);
+            }}
+          >
+            {DEVICE_SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="scroll-x -mx-4 mb-4 flex gap-2 px-4 sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filtrar equipos">
+        {FILTERS.map((f) => (
+          <Chip
+            key={f.id}
+            active={filter === f.id}
+            onClick={() => {
+              setFilter(f.id);
+              setPage(1);
+            }}
+            count={counts[f.id]}
+          >
+            {f.label}
+          </Chip>
+        ))}
       </div>
 
-      <ErrorText error={data.error} />
+      {data.devices && <ErrorText error={data.error} />}
 
-      <Card padded={false}>
+      <section id="equipos-listado" aria-label="Listado de equipos" className="scroll-mt-16 rounded-xl border border-line bg-surface shadow-card">
         {!data.devices ? (
-          <div className="flex flex-col gap-3 p-5">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}
-          </div>
+          data.error ? (
+            <ErrorState title="No pudimos cargar los equipos" error={data.error} onRetry={data.reload} />
+          ) : (
+            <div className="flex flex-col gap-3 p-4 sm:p-5" role="status" aria-label="Cargando equipos">
+              {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12" />)}
+            </div>
+          )
         ) : shown.length === 0 ? (
-          <EmptyState icon={Tv} title={devices.length === 0 ? 'Todavía no hay equipos' : 'Ningún equipo coincide'}>
-            {devices.length === 0 ? 'Encendé un TV box con NEX-OS y vinculalo con el código o el QR que muestra.' : 'Probá con otro filtro o búsqueda.'}
-          </EmptyState>
+          devices.length === 0 ? (
+            <EmptyState icon={Tv} title="Todavía no hay equipos" action={<Button icon={Plus} onClick={() => setDialog({ kind: 'claim' })}>Vincular el primer equipo</Button>}>
+              Encendé un TV box con NEX y vinculalo con el código o el QR que muestra en pantalla.
+            </EmptyState>
+          ) : (
+            <EmptyState icon={SearchX} title="Ningún equipo coincide" action={narrowed && <Button variant="secondary" onClick={clear}>Quitar filtros</Button>}>
+              Probá con otro filtro o con otra búsqueda.
+            </EmptyState>
+          )
         ) : (
           <>
             {/* Escritorio */}
-            <table className="hidden w-full text-left md:table">
+            <table className="hidden w-full border-separate border-spacing-0 md:table">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wider text-zinc-500">
-                  <th className="px-5 pb-3 font-medium">Equipo</th>
-                  <th className="pb-3 font-medium">Estado</th>
-                  <th className="pb-3 font-medium">Conexión</th>
-                  <th className="pb-3 font-medium">Pago</th>
-                  <th className="pb-3" />
+                <tr>
+                  <th scope="col" className={`${th} rounded-tl-xl pl-5`}>Equipo</th>
+                  <th scope="col" className={th}>Estado</th>
+                  <th scope="col" className={th}>Salud</th>
+                  <th scope="col" className={th}>Conexión</th>
+                  <th scope="col" className={th}>Pago</th>
+                  <th scope="col" className={`${th} rounded-tr-xl`}><span className="sr-only">Acciones</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -867,42 +1010,45 @@ export default function DevicesPage({
                   const issues = healthIssues(d);
                   const pay = paymentText(d, company);
                   const online = isOnline(d);
+                  const td = 'border-b border-line py-2.5 align-middle group-last:border-b-0';
                   return (
-                    <tr key={d.id} onClick={() => onSelect(d.id)} className="cursor-pointer border-t border-white/[0.05] transition hover:bg-white/[0.03]">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-zinc-400">
-                            <Tv className="h-4 w-4" aria-hidden />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-zinc-100">{d.name ?? 'Sin nombre'}</div>
-                            <div className="font-mono text-[11px] text-zinc-500">{d.id.slice(0, 8)} · {d.firmware_version ?? '—'}</div>
-                          </div>
-                        </div>
+                    <tr key={d.id} onClick={() => onSelect(d.id)} className={`group cursor-pointer transition ${d.id === selectedId ? 'bg-accent-soft' : 'hover:bg-fill'}`}>
+                      <td className={`${td} max-w-0 pl-5 pr-4 lg:w-[30%]`}>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }} className="block max-w-full rounded text-left">
+                          <span className={`block truncate text-sm font-medium ${d.name ? 'text-fg' : 'text-fg-3'}`}>{d.name ?? 'Sin nombre'}</span>
+                          <span className="block truncate font-mono text-[11px] text-fg-4">
+                            {d.id.slice(0, 8)} · {d.firmware_version ?? '—'}{d.external_ref && ` · ${d.external_ref}`}
+                          </span>
+                        </button>
                       </td>
-                      <td className="py-3.5">
+                      <td className={`${td} max-w-0 pr-4 lg:w-[26%]`}>
                         <div className="flex flex-col items-start gap-1">
                           <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
-                          {applied === 'pendiente' && <span className="flex items-center gap-1 text-[11px] text-amber-300"><Hourglass className="h-3 w-3" aria-hidden /> Pendiente de aplicar</span>}
-                          {issues.length > 0 && <span className="flex items-center gap-1 text-[11px] text-rose-300"><ShieldAlert className="h-3 w-3" aria-hidden /> {issues[0]}</span>}
+                          {applied === 'pendiente' && <span className="flex items-center gap-1 text-xs text-warn"><Hourglass className="h-3 w-3 shrink-0" aria-hidden /> Pendiente de aplicar</span>}
+                          {issues.length > 0 && (
+                            <span className="flex max-w-full items-center gap-1 text-xs text-danger" title={issues.join(' · ')}>
+                              <ShieldAlert className="h-3 w-3 shrink-0" aria-hidden /> <span className="truncate">{issues[0]}</span>
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td className="py-3.5">
-                        <div className="flex items-center gap-2 text-sm text-zinc-300">
-                          <StatusDot online={online} /> {online ? 'En línea' : relativeTime(d.last_seen_at)}
+                      <td className={`${td} pr-4`}><HealthPill score={data.health.get(d.id)} /></td>
+                      <td className={`${td} pr-4`}>
+                        <div className="flex items-center gap-2 whitespace-nowrap text-sm text-fg-2">
+                          <StatusDot online={online} /> {online ? 'En línea' : <span className="text-fg-3">{relativeTime(d.last_seen_at)}</span>}
                         </div>
                       </td>
-                      <td className={`py-3.5 text-sm ${pay.tone}`}>{pay.text}</td>
-                      <td className="py-3.5 pr-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1">
+                      <td className={`${td} whitespace-nowrap pr-4 text-sm ${pay.tone}`}>{pay.text}</td>
+                      <td className={`${td} pr-3`} onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-0.5">
                           {d.locked ? (
                             <IconButton icon={LockOpen} label="Desbloquear" tone="success" onClick={() => quickUnlock(d)} />
                           ) : (
-                            <IconButton icon={Lock} label="Bloquear" tone="danger" onClick={() => setDialog({ kind: 'lock', device: d })} />
+                            <IconButton icon={Lock} label="Bloquear" onClick={() => setDialog({ kind: 'lock', device: d })} />
                           )}
                           <IconButton icon={CalendarPlus} label="Registrar pago" onClick={() => setDialog({ kind: 'payment', device: d })} />
                           <Menu
-                            trigger={(toggle) => <IconButton icon={EllipsisVertical} label="Más acciones" onClick={toggle} />}
+                            trigger={(toggle, open) => <IconButton icon={EllipsisVertical} label="Más acciones" aria-haspopup="menu" aria-expanded={open} onClick={toggle} />}
                             items={[
                               { label: 'Ver detalle', icon: Activity, onClick: () => onSelect(d.id) },
                               d.restricted
@@ -921,35 +1067,61 @@ export default function DevicesPage({
             </table>
 
             {/* Celular */}
-            <ul className="divide-y divide-white/[0.05] md:hidden">
+            <ul className="divide-y divide-line md:hidden">
               {shown.map((d) => {
                 const st = STATUS_META[deviceStatus(d, company)];
                 const pay = paymentText(d, company);
+                const online = isOnline(d);
+                const issues = healthIssues(d);
                 return (
                   <li key={d.id}>
-                    <button onClick={() => onSelect(d.id)} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
-                      <StatusDot online={isOnline(d)} />
+                    <button type="button" onClick={() => onSelect(d.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition active:bg-fill">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-zinc-100">{d.name ?? 'Sin nombre'}</div>
-                        <div className={`text-xs ${pay.tone}`}>{pay.text}</div>
+                        <div className="flex items-center gap-2">
+                          <StatusDot online={online} />
+                          <span className={`truncate text-[15px] font-medium ${d.name ? 'text-fg' : 'text-fg-3'}`}>{d.name ?? 'Sin nombre'}</span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
+                          {issues.length > 0 && <Badge tone="danger" icon={ShieldAlert}>Alerta</Badge>}
+                          <HealthPill score={data.health.get(d.id)} />
+                        </div>
+                        <div className="mt-1.5 truncate text-[13px] text-fg-4">
+                          <span className="sr-only">{online ? 'En línea. ' : 'Sin conexión. '}</span>
+                          {!online && <>Visto {relativeTime(d.last_seen_at)} · </>}
+                          <span className={pay.tone}>{pay.text}</span>
+                        </div>
                       </div>
-                      <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
                     </button>
                   </li>
                 );
               })}
             </ul>
+
+            <Pagination page={view.page} pageCount={view.pageCount} from={view.from} to={view.to} total={view.total} onPage={goPage} />
           </>
         )}
-      </Card>
+      </section>
 
-      <p className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
-        <HardDrive className="h-3.5 w-3.5" aria-hidden />
+      <p className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-fg-4">
+        <HardDrive className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
         Los equipos sincronizan cada minuto. Un pago vencido restringe o bloquea el TV aunque no tenga internet.
       </p>
 
       {selected && (
-        <DeviceDrawer device={selected} company={company} events={data.events} onClose={() => onSelect(null)} onAction={setDialog} onChanged={data.reload} />
+        <DeviceDrawer
+          key={selected.id}
+          device={selected}
+          company={company}
+          events={data.events}
+          score={data.health.get(selected.id)}
+          inputs={data.healthInputs.get(selected.id)}
+          now={data.loadedAt}
+          onClose={() => onSelect(null)}
+          onAction={setDialog}
+          onChanged={data.reload}
+        />
       )}
       {dialog?.kind === 'lock' && <LockModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
       {dialog?.kind === 'restrict' && <RestrictModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
