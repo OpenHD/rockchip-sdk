@@ -1,0 +1,191 @@
+import type { Device } from './api';
+
+/**
+ * Semáforo de salud del TV box (0-100) y lectura del diagnóstico de red.
+ *
+ * El equipo informa en health (cada sync) temperatura, memoria, almacenamiento y una medición liviana de red
+ * (cada 5 min); el servidor aporta encendidos, reinicios del agente y errores de las últimas 24 h
+ * (mdm_device_health_inputs). Lo que el equipo no informa (por ejemplo, la temperatura en un box que no la expone)
+ * no resta: el puntaje se basa solo en lo que se sabe y las razones lo explican.
+ */
+
+/** Medición liviana de red que el equipo manda en health.net. */
+export interface NetQuick {
+  /** Tipo de conexión. */
+  t?: 'wifi' | 'eth' | 'none' | string;
+  /** dBm; solo Wi-Fi. */
+  rssi?: number | null;
+  /** Latencia y pérdida (%) hasta el router/ONU (gateway). */
+  gw_ms?: number | null;
+  gw_loss?: number | null;
+  /** Latencia y pérdida (%) hasta internet. */
+  inet_ms?: number | null;
+  inet_loss?: number | null;
+}
+
+/** Resultado del diagnóstico completo (mdm_devices.net_diag). */
+export interface NetDiag extends NetQuick {
+  req?: number;
+  at?: number;
+  /** Velocidad del enlace Wi-Fi (Mbps) y banda (MHz). */
+  link_mbps?: number | null;
+  freq_mhz?: number | null;
+  /** ms para resolver un nombre; null = el DNS no respondió. */
+  dns_ms?: number | null;
+  /** ms hasta el servidor de NEX (HTTPS). */
+  mdm_ms?: number | null;
+  /** Velocidad de bajada medida (Mbps). */
+  down_mbps?: number | null;
+  error?: string;
+}
+
+export interface HealthInputs {
+  device_id: string;
+  boots: number;
+  restarts: number;
+  errors: number;
+}
+
+export type HealthBand = 'bien' | 'atencion' | 'problemas' | 'sin-datos';
+
+export interface HealthScore {
+  score: number | null;
+  band: HealthBand;
+  /** Qué restó puntos, de lo más grave a lo menos. */
+  reasons: { text: string; points: number }[];
+}
+
+export const BAND_META: Record<HealthBand, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+  bien: { label: 'Bien', tone: 'success' },
+  atencion: { label: 'Atención', tone: 'warning' },
+  problemas: { label: 'Problemas', tone: 'danger' },
+  'sin-datos': { label: 'Sin datos', tone: 'neutral' },
+};
+
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** Penalidades de red compartidas entre la medición liviana y el diagnóstico. */
+function networkPenalties(n: NetQuick | undefined, add: (text: string, points: number) => void) {
+  if (!n) return;
+  const rssi = num(n.rssi);
+  if (n.t === 'wifi' && rssi !== null) {
+    if (rssi <= -80) add(`Señal Wi-Fi muy débil (${rssi} dBm)`, 15);
+    else if (rssi <= -70) add(`Señal Wi-Fi débil (${rssi} dBm)`, 7);
+  }
+  const gwLoss = num(n.gw_loss);
+  if (gwLoss !== null && gwLoss >= 20) add(`Pierde ${gwLoss}% de paquetes hasta el router`, 15);
+  else if (gwLoss !== null && gwLoss >= 5) add(`Pierde ${gwLoss}% de paquetes hasta el router`, 7);
+  const inetLoss = num(n.inet_loss);
+  if (inetLoss !== null && inetLoss >= 10) add(`Pierde ${inetLoss}% de paquetes hasta internet`, 10);
+  const inetMs = num(n.inet_ms);
+  if (inetMs !== null && inetMs >= 200) add(`Latencia alta a internet (${Math.round(inetMs)} ms)`, 5);
+}
+
+export function healthScore(d: Device, inputs: HealthInputs | undefined, now = Date.now()): HealthScore {
+  if (!d.last_seen_at) return { score: null, band: 'sin-datos', reasons: [] };
+  const h = d.health ?? {};
+  const reasons: HealthScore['reasons'] = [];
+  const add = (text: string, points: number) => reasons.push({ text, points });
+
+  const hoursOff = (now - new Date(d.last_seen_at).getTime()) / 3_600_000;
+  if (hoursOff >= 24) add(`Sin conexión hace ${Math.floor(hoursOff / 24)} d`, 40);
+  else if (hoursOff >= 1) add(`Sin conexión hace ${Math.floor(hoursOff)} h`, 25);
+
+  const temp = num(h.temp_c);
+  if (temp !== null) {
+    if (temp >= 85) add(`Temperatura muy alta (${Math.round(temp)} °C)`, 30);
+    else if (temp >= 75) add(`Temperatura alta (${Math.round(temp)} °C)`, 15);
+    else if (temp >= 65) add(`Temperatura elevada (${Math.round(temp)} °C)`, 5);
+  }
+
+  const ramAvail = num(h.ram_avail_mb);
+  const ramTotal = num(h.ram_total_mb);
+  if (h.low_mem === true) add('Android avisa poca memoria', 15);
+  else if (ramAvail !== null && ramTotal) {
+    const pct = (ramAvail / ramTotal) * 100;
+    if (pct < 10) add(`Memoria libre ${Math.round(pct)}%`, 10);
+    else if (pct < 15) add(`Memoria libre ${Math.round(pct)}%`, 5);
+  }
+
+  const free = num(h.free_mb);
+  if (free !== null) {
+    if (free < 200) add(`Almacenamiento casi lleno (${free} MB libres)`, 25);
+    else if (free < 500) add(`Poco almacenamiento (${free} MB libres)`, 10);
+    else if (free < 1024) add(`Almacenamiento justo (${(free / 1024).toFixed(1)} GB libres)`, 5);
+  }
+
+  networkPenalties(h.net, add);
+
+  if (inputs) {
+    if (inputs.boots >= 6) add(`${inputs.boots} encendidos en 24 h`, 25);
+    else if (inputs.boots >= 3) add(`${inputs.boots} encendidos en 24 h`, 15);
+    if (inputs.restarts >= 5) add(`NEX se reinició ${inputs.restarts} veces en 24 h`, 20);
+    else if (inputs.restarts >= 2) add(`NEX se reinició ${inputs.restarts} veces en 24 h`, 10);
+    if (inputs.errors > 0) add(`${inputs.errors} ${inputs.errors === 1 ? 'error' : 'errores'} en 24 h`, Math.min(20, inputs.errors * 5));
+  }
+
+  reasons.sort((a, b) => b.points - a.points);
+  const score = Math.max(0, 100 - reasons.reduce((s, r) => s + r.points, 0));
+  return { score, band: score >= 80 ? 'bien' : score >= 50 ? 'atencion' : 'problemas', reasons };
+}
+
+// ---------------------------------------------------------------------------
+// Diagnóstico de red
+// ---------------------------------------------------------------------------
+
+export type NetVerdict = 'ok' | 'red-local' | 'internet' | 'sin-conexion';
+
+export const VERDICT_META: Record<NetVerdict, { title: string; text: string; tone: 'success' | 'warning' | 'danger' }> = {
+  ok: {
+    title: 'La red está bien',
+    text: 'Wi-Fi, router e internet responden bien. Si una app de TV falla, el problema está en la app o en su servidor.',
+    tone: 'success',
+  },
+  'red-local': {
+    title: 'Problema en la red de la casa',
+    text: 'Falla el tramo entre el TV box y el router/ONU (Wi-Fi débil o con interferencia, o el cable). Acercar el router, usar 5 GHz o cable.',
+    tone: 'warning',
+  },
+  internet: {
+    title: 'Problema en el acceso a internet',
+    text: 'El router responde bien pero internet no: revisar la ONU, el enlace o la red del ISP.',
+    tone: 'danger',
+  },
+  'sin-conexion': {
+    title: 'Sin conexión',
+    text: 'El equipo no llega al router. Revisar que esté conectado al Wi-Fi o al cable.',
+    tone: 'danger',
+  },
+};
+
+/** Lee el diagnóstico y dice en qué tramo está el problema, con los motivos. */
+export function netVerdict(n: NetDiag): { verdict: NetVerdict; reasons: string[] } {
+  const reasons: string[] = [];
+  const gwMs = num(n.gw_ms);
+  const gwLoss = num(n.gw_loss);
+  const rssi = num(n.rssi);
+  if (n.t === 'none' || (gwMs === null && (gwLoss === null || gwLoss >= 100) && num(n.inet_ms) === null)) {
+    return { verdict: 'sin-conexion', reasons: ['No responde el router ni internet'] };
+  }
+
+  // Tramo local: TV box ↔ router/ONU.
+  if (n.t === 'wifi' && rssi !== null && rssi <= -75) reasons.push(`Señal Wi-Fi débil (${rssi} dBm)`);
+  if (gwLoss !== null && gwLoss >= 10) reasons.push(`Pierde ${gwLoss}% de paquetes hasta el router`);
+  if (gwMs !== null && gwMs >= 40) reasons.push(`Router lento en responder (${Math.round(gwMs)} ms)`);
+  const linkMbps = num(n.link_mbps);
+  if (n.t === 'wifi' && linkMbps !== null && linkMbps < 20) reasons.push(`Enlace Wi-Fi lento (${linkMbps} Mbps)`);
+  if (reasons.length) return { verdict: 'red-local', reasons };
+
+  // Tramo de acceso: router ↔ internet.
+  const inetLoss = num(n.inet_loss);
+  const inetMs = num(n.inet_ms);
+  const down = num(n.down_mbps);
+  if (inetMs === null && (inetLoss === null || inetLoss >= 100)) reasons.push('Internet no responde');
+  if (inetLoss !== null && inetLoss >= 5 && inetLoss < 100) reasons.push(`Pierde ${inetLoss}% de paquetes hasta internet`);
+  if (inetMs !== null && inetMs >= 150) reasons.push(`Latencia alta a internet (${Math.round(inetMs)} ms)`);
+  if ('dns_ms' in n && n.dns_ms === null) reasons.push('El DNS no responde');
+  if (down !== null && down < 5) reasons.push(`Velocidad de bajada baja (${down} Mbps)`);
+  if (reasons.length) return { verdict: 'internet', reasons };
+
+  return { verdict: 'ok', reasons: [] };
+}

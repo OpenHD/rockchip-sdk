@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseErrorMessage } from '../lib/supabase';
 import { getAdminSupabase } from './supabaseAdmin';
+import type { NetDiag, NetQuick } from './health';
 
 export interface Company {
   id: string;
@@ -40,6 +41,16 @@ export interface DeviceHealth {
   uptime?: number;
   free_mb?: number;
   agent?: number;
+  /** v12 (NEX TV Android): temperatura máxima de las zonas térmicas, °C. */
+  temp_c?: number | null;
+  ram_avail_mb?: number;
+  ram_total_mb?: number;
+  /** Android avisa que se está quedando sin memoria. */
+  low_mem?: boolean;
+  /** Almacenamiento total de datos, MB. */
+  storage_mb?: number;
+  /** Medición liviana de red (cada 5 min). */
+  net?: NetQuick;
 }
 
 export interface DeviceEvent {
@@ -67,10 +78,17 @@ export const EVENT_LABELS: Record<string, string> = {
   piracy_attempt: 'Intento de abrir sitio pirata',
   agent_started: 'Equipo encendido',
   test: 'Aviso de prueba',
+  update_started: 'Actualización de NEX TV en curso',
+  update_installed: 'NEX TV actualizado',
+  update_failed: 'Falló la actualización de NEX TV',
+  update_rejected: 'Actualización de NEX TV rechazada',
+  app_installed: 'App del operador instalada',
+  app_install_failed: 'No se pudo instalar una app del operador',
+  app_removed: 'App del operador desinstalada',
 };
 
 export const DEVICE_COLUMNS =
-  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref, restricted, restrict_reason' as const;
+  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref, restricted, restrict_reason, diag_requested_at, net_diag, net_diag_at' as const;
 
 export interface Device {
   id: string;
@@ -92,6 +110,10 @@ export interface Device {
   /** v9: restricción manual (menú y red sí, apps no). */
   restricted: boolean;
   restrict_reason: string | null;
+  /** v12: último pedido de diagnóstico de red y su resultado. */
+  diag_requested_at: string | null;
+  net_diag: NetDiag | null;
+  net_diag_at: string | null;
 }
 
 /** Mismo formato que valida la base (mdm_devices.external_ref). */
@@ -142,6 +164,44 @@ export interface CatalogApp {
   active: boolean;
   /** Se le pasa al servicio la atestación del equipo (JWT) al abrirlo. */
   pass_attestation?: boolean;
+}
+
+/** v12: app Android que el ISP carga para sus equipos (Play Store o APK propio). */
+export interface AndroidApp {
+  company_id: string;
+  package: string;
+  name: string;
+  source: 'play' | 'apk';
+  apk_path: string | null;
+  version_code: number | null;
+  version_name: string | null;
+  sha256: string | null;
+  size: number | null;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export const APK_BUCKET = 'mdm-apps';
+/** Mismo límite que el bucket mdm-apps. */
+export const APK_MAX_BYTES = 200 * 1024 * 1024;
+/** Mismo formato que valida la base (mdm_company_android_apps.package). */
+export const PACKAGE_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+
+/** v12: comunicado a los TV de la empresa (mdm_list_notices). */
+export type NoticeCategory = 'corte' | 'clima' | 'salud' | 'municipal' | 'general';
+export type NoticeSeverity = 'info' | 'importante' | 'emergencia';
+export interface Notice {
+  id: string;
+  title: string;
+  body: string;
+  category: NoticeCategory;
+  severity: NoticeSeverity;
+  starts_at: string;
+  expires_at: string;
+  created_at: string;
+  cancelled_at: string | null;
+  seen: number;
+  devices: number;
 }
 
 export interface UnlockCode {
