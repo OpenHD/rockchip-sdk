@@ -7,6 +7,7 @@
 --   3 minutos sin sincronizar, y sale cuando quedan 20 % o menos. Eventos zone_outage / zone_restored (categoría
 --   'offline', sin equipo), así llegan por Telegram/mail a las empresas con alertas de "Sin conexión".
 -- * mdm_zone_status: estado por zona para el panel.
+-- * API del ISP: POST /devices/<id>/zone {zone: "Nombre" | null} (mdm_isp_set_zone) y "zone" en el JSON del equipo.
 -- El sync es el de v12 con el filtro de zona en los comunicados.
 -- Idempotente.
 
@@ -405,6 +406,73 @@ begin
   return new;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- API del ISP: zona del equipo (por nombre; se crea si no existe)
+-- ---------------------------------------------------------------------------
+
+create or replace function public._mdm_isp_device_json(p_device public.mdm_devices)
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'id', p_device.id,
+    'name', p_device.name,
+    'external_ref', p_device.external_ref,
+    'locked', p_device.locked,
+    'lock_reason', p_device.lock_reason,
+    'paid_until', p_device.paid_until,
+    'online', coalesce(p_device.last_seen_at > now() - interval '5 minutes', false),
+    'last_seen_at', p_device.last_seen_at,
+    'reported_mode', p_device.reported_mode,
+    'reported_lock_kind', p_device.reported_lock_kind,
+    'firmware_version', p_device.firmware_version,
+    -- v9
+    'restricted', p_device.restricted,
+    'restrict_reason', p_device.restrict_reason,
+    'service_state', (select public._mdm_service_state(p_device, c)
+                        from public.mdm_companies c where c.id = p_device.company_id),
+    -- v15
+    'zone', (select z.name from public.mdm_zones z where z.id = p_device.zone_id)
+  );
+$$;
+revoke all on function public._mdm_isp_device_json(public.mdm_devices) from public, anon, authenticated;
+
+create or replace function public.mdm_isp_set_zone(p_key_hash text, p_id text, p_zone text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_key public.mdm_api_keys := public._mdm_isp_key(p_key_hash);
+  v_device public.mdm_devices := public._mdm_isp_device(v_key.company_id, p_id);
+  v_name text := nullif(btrim(coalesce(p_zone, '')), '');
+  v_zone uuid;
+begin
+  if v_name is not null then
+    if length(v_name) > 60 then
+      raise exception 'zone debe tener hasta 60 caracteres' using errcode = '22023';
+    end if;
+    select id into v_zone from public.mdm_zones where company_id = v_key.company_id and lower(name) = lower(v_name);
+    if v_zone is null then
+      if (select count(*) from public.mdm_zones where company_id = v_key.company_id) >= 200 then
+        raise exception 'Máximo 200 zonas por empresa' using errcode = '54000';
+      end if;
+      insert into public.mdm_zones (company_id, name) values (v_key.company_id, v_name) returning id into v_zone;
+    end if;
+  end if;
+  update public.mdm_devices set zone_id = v_zone where id = v_device.id;
+  perform public._mdm_audit_as('api:' || v_key.name, v_key.company_id, 'device.zone', v_device.id::text,
+    jsonb_build_object('zone', v_name, 'api_key', v_key.id));
+  select * into v_device from public.mdm_devices where id = v_device.id;
+  return public._mdm_isp_device_json(v_device);
+end;
+$$;
+revoke all on function public.mdm_isp_set_zone(text, text, text) from public, anon, authenticated;
+grant execute on function public.mdm_isp_set_zone(text, text, text) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Sync del equipo: v12 con los comunicados filtrados por zona.

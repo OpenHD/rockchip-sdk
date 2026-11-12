@@ -9,6 +9,7 @@
 //   POST /devices/<id>/external-ref  {external_ref: string | null}
 //   POST /devices/<id>/unlock-code             → {code, valid_on, hours}
 //   POST /devices/<id>/restrict      {restricted: bool, reason?}   (v9)
+//   POST /devices/<id>/zone          {zone: "Nombre" | null}       (v15: se crea si no existe)
 // <id> = uuid del equipo o ref:<external_ref>.
 // El equipo incluye (v9) restricted, restrict_reason y service_state ('locked'|'restricted'|'warning'|'active').
 // Auth: Authorization: Bearer nexk_<43 caracteres base64url>. En la base solo vive sha256(clave).
@@ -361,6 +362,14 @@ async function handle(req: Request): Promise<Response> {
         p_restricted: body.restricted,
         p_reason: body.restricted ? reason : null,
       }));
+    }
+    case 'zone': {
+      const body = await readBody(req, ['zone']);
+      const zone = body.zone ?? null;
+      if (zone !== null && (typeof zone !== 'string' || zone.trim().length > 60)) {
+        throw new HttpError(400, 'zone debe ser texto de hasta 60 caracteres o null');
+      }
+      return json(200, await rpc('mdm_isp_set_zone', { p_key_hash, p_id, p_zone: zone }));
     }
     default:
       throw new HttpError(404, 'Ruta inexistente');
