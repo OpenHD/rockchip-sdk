@@ -24,8 +24,10 @@ import java.io.File
  *
  * - subida: promedio de los últimos 5 min sin contar el tráfico de NEX (health.up_mbps). Si pasa de UPLOAD_ALERT_MBPS
  *   en 3 ventanas seguidas (15 min), evento upload_anomaly (uno cada 6 h).
- * - puertas: puertos de fábrica escuchando, su con setuid y apps de control remoto habilitadas (health.factory).
- *   Evento factory_backdoor al arrancar y cada vez que cambia lo encontrado.
+ * - puertas: puertos de fábrica escuchando y apps de control remoto habilitadas (health.factory). Evento
+ *   factory_backdoor al arrancar y cada vez que cambia lo encontrado.
+ * - su con setuid se informa (health.factory.su) pero no es una puerta trasera por sí solo: los TX6698 traen root en un
+ *   firmware userdebug y el kit de instalación lo usa para copiar NEX al sistema. No dispara el evento.
  */
 object FactoryRisk {
     private const val TAG = "nex-risk"
@@ -92,10 +94,14 @@ object FactoryRisk {
         val pkgs = REMOTE_PACKAGES.filter { enabled(ctx, it) }
         if (pkgs.isNotEmpty()) o.put("pkgs", JSONArray(pkgs))
         factory = o
-        val key = o.toString()
+        // Solo puertos y apps remotas son puertas traseras; su solo, no (ver arriba).
+        val risky = JSONObject()
+        o.optJSONArray("ports")?.let { risky.put("ports", it) }
+        o.optJSONArray("pkgs")?.let { risky.put("pkgs", it) }
+        val key = risky.toString()
         if (key != lastFactory) {
             lastFactory = key
-            if (o.length() > 0) Agent.addEvent("factory_backdoor", o)
+            if (risky.length() > 0) Agent.addEvent("factory_backdoor", risky)
         }
     }
 
