@@ -36,6 +36,7 @@ GUARD=os.nex.tv/os.nex.tv.Guard
 # Adware y proxy de fábrica encontrados en boxes HiSilicon TX6 (nov. 2026). Primero el plugin del fabricante,
 # que instala los demás y los puede volver a activar.
 ADWARE=(
+	com.example.himac    # le manda comandos al shell root de fábrica (cmd_root, TCP/40000)
 	com.lz.sysplugin     # plugin del fabricante: instala apps en silencio, control remoto y proxy
 	com.android.tvh      # publicidad superpuesta ("AD") y protector de pantalla con anuncios
 	com.android.network  # cliente de proxy (ShadowsocksR)
@@ -76,7 +77,13 @@ change cmd package set-home-activity "$PKG/.MainActivity"
 
 step "Desactivando el adware de fábrica"
 for p in "${ADWARE[@]}"; do
-	if installed "$p"; then change pm disable-user --user 0 "$p"; else echo "    $p: no está"; fi
+	if installed "$p"; then
+		change pm disable-user --user 0 "$p"
+		# Desactivar no cierra el proceso que ya corre: se cierra acá para que no siga hasta el próximo reinicio.
+		change am force-stop "$p"
+	else
+		echo "    $p: no está"
+	fi
 done
 change settings put secure screensaver_enabled 0
 
@@ -120,7 +127,7 @@ for p in "${ADWARE[@]}"; do
 	installed "$p" || continue
 	if grep -qx "package:$p" <<<"$disabled"; then ok "$p desactivado"; else bad "$p sigue activo"; fi
 done
-if dev ps -A -o NAME | grep -qxE 'com\.lz\.sysplugin|com\.android\.tvh|com\.android\.network|hp_special_ndk'; then
+if dev ps -A -o NAME | grep -qxE 'com\.example\.himac|com\.lz\.sysplugin|com\.android\.tvh|com\.android\.network|hp_special_ndk'; then
 	bad "quedan procesos del adware corriendo"
 else
 	ok "sin procesos del adware"
