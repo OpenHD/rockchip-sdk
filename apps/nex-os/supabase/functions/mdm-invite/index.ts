@@ -12,6 +12,12 @@
 // POST { kind: 'resend', email }  NEX o un dueño de una empresa de esa persona → { sent: 'invite' | 'recovery' }
 //   mdm_resend_precheck decide: invitación si nunca entró, link de contraseña nueva si ya tenía cuenta.
 //
+// Entrega (MDM_AUTH_DELIVERY):
+// * 'link' (por defecto, sin SMTP): no se manda email. La respuesta trae { link } al panel con
+//   ?token_hash=…&type=invite|recovery, para mandarlo por WhatsApp o copiarlo. El link es del panel y no de Supabase:
+//   la vista previa de WhatsApp lo abre sin gastarlo, y el panel lo canjea recién cuando la persona aprieta "Continuar".
+// * 'email': Supabase manda el email (necesita SMTP propio configurado en Auth).
+//
 // Secretos: MDM_PANEL_URL (ej. https://nex-mdm-demo.vercel.app/admin, debe estar en Auth > URL Configuration).
 // SUPABASE_URL, SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY los inyecta Supabase.
 // Deploy: supabase functions deploy mdm-invite   (con verificación de JWT)
@@ -28,6 +34,7 @@ const SUPABASE_URL = env('SUPABASE_URL');
 const ANON_KEY = env('SUPABASE_ANON_KEY');
 const SERVICE_KEY = env('SUPABASE_SERVICE_ROLE_KEY');
 const PANEL_URL = Deno.env.get('MDM_PANEL_URL') ?? 'https://nex-mdm-demo.vercel.app/admin';
+const DELIVERY = Deno.env.get('MDM_AUTH_DELIVERY') === 'email' ? 'email' : 'link';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -51,7 +58,34 @@ async function rpcAsCaller(auth: string, fn: string, args: Record<string, unknow
   return { ok: res.ok, status: res.status, data };
 }
 
-/** Manda la invitación de Supabase (crea la cuenta sin contraseña). */
+type Delivered = { link?: string; error?: Response };
+
+/**
+ * Invitación (crea la cuenta sin contraseña) o link de contraseña nueva, según MDM_AUTH_DELIVERY.
+ * Con 'link' se pide a Supabase el token sin mandar email (admin/generate_link) y se arma el link al panel.
+ */
+async function deliver(type: 'invite' | 'recovery', email: string): Promise<Delivered> {
+  if (DELIVERY === 'email') {
+    const error = type === 'invite' ? await sendInvite(email) : await sendRecovery(email);
+    return error ? { error } : {};
+  }
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/generate_link`, {
+    method: 'POST',
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, email, redirect_to: PANEL_URL }),
+  });
+  const data = await res.json().catch(() => ({}));
+  const hashed = data.hashed_token ?? data.properties?.hashed_token;
+  if (!res.ok || typeof hashed !== 'string') {
+    return { error: reply(502, { message: data.msg ?? data.message ?? 'No se pudo generar el link de acceso' }) };
+  }
+  const url = new URL(PANEL_URL);
+  url.searchParams.set('token_hash', hashed);
+  url.searchParams.set('type', type);
+  return { link: url.toString() };
+}
+
+/** Manda la invitación de Supabase por email (MDM_AUTH_DELIVERY=email). */
 async function sendInvite(email: string): Promise<Response | null> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/invite?redirect_to=${encodeURIComponent(PANEL_URL)}`, {
     method: 'POST',
@@ -101,22 +135,24 @@ Deno.serve(async (req) => {
     const name = String(body.name ?? '').trim();
     const pre = await rpcAsCaller(auth, 'mdm_company_precheck', { p_name: name, p_owner_email: email });
     if (!pre.ok) return rpcError(pre, 'Sin permiso');
+    let link: string | undefined;
     if (!pre.data?.exists) {
-      const failed = await sendInvite(email);
-      if (failed) return failed;
+      const d = await deliver('invite', email);
+      if (d.error) return d.error;
+      link = d.link;
     }
     const created = await rpcAsCaller(auth, 'mdm_create_company', { p_name: name, p_owner_email: email });
     if (!created.ok) return rpcError(created, 'No se pudo crear la empresa');
-    return reply(200, { company: created.data, invited: !pre.data?.exists });
+    return reply(200, { company: created.data, invited: !pre.data?.exists, link, delivery: DELIVERY });
   }
 
   if (kind === 'resend') {
     const pre = await rpcAsCaller(auth, 'mdm_resend_precheck', { p_email: email });
     if (!pre.ok) return rpcError(pre, 'Sin permiso');
     const type = pre.data?.type === 'invite' ? 'invite' : 'recovery';
-    const failed = type === 'invite' ? await sendInvite(email) : await sendRecovery(email);
-    if (failed) return failed;
-    return reply(200, { sent: type });
+    const d = await deliver(type, email);
+    if (d.error) return d.error;
+    return reply(200, { sent: type, link: d.link, delivery: DELIVERY });
   }
 
   if (kind !== 'member') return reply(400, { message: 'Acción desconocida' });
@@ -126,13 +162,15 @@ Deno.serve(async (req) => {
   if (!pre.ok) return rpcError(pre, 'Sin permiso');
 
   let invited = false;
+  let link: string | undefined;
   if (!pre.data?.exists) {
-    const failed = await sendInvite(email);
-    if (failed) return failed;
+    const d = await deliver('invite', email);
+    if (d.error) return d.error;
+    link = d.link;
     invited = true;
   }
 
   const set = await rpcAsCaller(auth, 'mdm_set_member', { p_company: company, p_email: email, p_role: role });
   if (!set.ok) return rpcError(set, 'No se pudo sumar al miembro');
-  return reply(200, { invited });
+  return reply(200, { invited, link, delivery: DELIVERY });
 });
