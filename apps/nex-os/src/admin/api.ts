@@ -99,10 +99,12 @@ export const EVENT_LABELS: Record<string, string> = {
   app_removed: 'App del operador desinstalada',
   upload_anomaly: 'Subida alta sin uso (posible equipo infectado)',
   factory_backdoor: 'Puertas traseras de fábrica abiertas',
+  zone_outage: 'Caída masiva en una zona',
+  zone_restored: 'Zona recuperada',
 };
 
 export const DEVICE_COLUMNS =
-  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref, restricted, restrict_reason, diag_requested_at, net_diag, net_diag_at' as const;
+  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref, restricted, restrict_reason, diag_requested_at, net_diag, net_diag_at, zone_id' as const;
 
 export interface Device {
   id: string;
@@ -128,6 +130,47 @@ export interface Device {
   diag_requested_at: string | null;
   net_diag: NetDiag | null;
   net_diag_at: string | null;
+  /** v15: zona (localidad, nodo u OLT) a la que pertenece. null = sin zona. */
+  zone_id: string | null;
+}
+
+/** v15: fila de mdm_zone_status. "online" = sincronizó en los últimos 5 minutos. */
+export interface ZoneStatus {
+  zone_id: string;
+  name: string;
+  total: number;
+  online: number;
+  /** Caída masiva en curso: cuándo empezó y el pico de equipos sin conexión. null = sin caída. */
+  outage_started_at: string | null;
+  outage_offline: number | null;
+}
+
+export const ZONE_OUTAGE_COLUMNS = 'id, zone_id, started_at, ended_at, offline, total, peak_offline' as const;
+
+/** v15: fila de mdm_zone_outages (historial de caídas masivas). ended_at null = sigue en curso. */
+export interface ZoneOutage {
+  id: number;
+  zone_id: string;
+  started_at: string;
+  ended_at: string | null;
+  offline: number;
+  total: number;
+  peak_offline: number;
+}
+
+// RPC de v15 (zonas) en un solo lugar.
+export const rpcUpsertZone = (company: string, id: string | null, name: string) =>
+  run<string>(db().rpc('mdm_upsert_zone', { p_company: company, p_id: id, p_name: name }));
+export const rpcDeleteZone = (id: string) => run(db().rpc('mdm_delete_zone', { p_id: id }));
+/** Mismo tope que mdm_set_devices_zone: más equipos que esto van en varias llamadas. */
+export const ZONE_BULK_MAX = 5000;
+/** Asigna (o quita, con null) la zona de muchos equipos. Devuelve cuántos cambiaron. */
+export async function rpcSetDevicesZone(company: string, devices: string[], zone: string | null): Promise<number> {
+  let changed = 0;
+  for (let i = 0; i < devices.length; i += ZONE_BULK_MAX) {
+    changed += (await run<number>(db().rpc('mdm_set_devices_zone', { p_company: company, p_devices: devices.slice(i, i + ZONE_BULK_MAX), p_zone: zone }))) ?? 0;
+  }
+  return changed;
 }
 
 /** Mismo formato que valida la base (mdm_devices.external_ref). */
@@ -215,7 +258,10 @@ export interface Notice {
   created_at: string;
   cancelled_at: string | null;
   seen: number;
+  /** v15: equipos a los que les llega (solo los de las zonas elegidas, si las hay). */
   devices: number;
+  /** v15: zonas a las que va dirigido. null = todos los equipos. */
+  zone_ids: string[] | null;
 }
 
 export interface UnlockCode {

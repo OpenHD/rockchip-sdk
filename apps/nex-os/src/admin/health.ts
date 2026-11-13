@@ -91,7 +91,7 @@ export function factoryRisks(f: FactoryRisk | undefined): string[] {
   if (!f) return [];
   return [
     ...(f.ports ?? []).map((p) => PORT_NAMES[p] ?? `puerto ${p}`),
-    ...(f.su ? ['su con permisos de root'] : []),
+    // su solo no es una puerta trasera: los TX6698 traen root (firmware userdebug) y el kit de instalación lo usa.
     ...(f.pkgs ?? []).map((p) => `app de control remoto ${p}`),
   ];
 }

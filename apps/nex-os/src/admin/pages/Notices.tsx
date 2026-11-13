@@ -8,14 +8,16 @@ import {
   HeartPulse,
   Info,
   Landmark,
+  MapPin,
   Megaphone,
   Send,
   Siren,
   TriangleAlert,
+  Tv,
   ZapOff,
   type LucideIcon,
 } from 'lucide-react';
-import { ApiError, db, run, type Company, type Notice, type NoticeCategory, type NoticeSeverity } from '../api';
+import { ApiError, db, run, type Company, type Device, type Notice, type NoticeCategory, type NoticeSeverity, type ZoneStatus } from '../api';
 import { relativeTime } from '../format';
 import {
   CATEGORY_LABELS,
@@ -28,6 +30,7 @@ import {
   NOTICES_PER_DAY,
   noticeStatus,
   noticeWindow,
+  noticeZones,
   seenPercent,
   sentLastDay,
   SEVERITY_META,
@@ -40,7 +43,8 @@ import {
   type NoticeTemplate,
 } from '../notices';
 import { useToast } from '../toast';
-import { Badge, Button, Card, Chip, EmptyState, ErrorText, IconButton, inputClass, Modal, PageHeader, Skeleton } from '../ui';
+import { Badge, Button, Card, Chip, EmptyState, ErrorText, IconButton, inputClass, Modal, PageHeader, SearchInput, Skeleton } from '../ui';
+import { audienceCount, audienceLabel, devicesText, searchZones } from '../zones';
 
 const POLL_MS = 30_000;
 
@@ -221,7 +225,7 @@ function SeenProgress({ notice }: { notice: Notice }) {
   const pct = seenPercent(notice);
   const text = notice.devices > 0
     ? `Visto en ${Math.min(notice.seen, notice.devices)} de ${notice.devices} ${notice.devices === 1 ? 'equipo' : 'equipos'}`
-    : 'Sin equipos vinculados';
+    : notice.zone_ids?.length ? 'Sin equipos en esas zonas' : 'Sin equipos vinculados';
   return (
     <div className="mt-2.5 max-w-sm">
       <div className="mb-1 flex items-center justify-between gap-3 text-xs">
@@ -235,8 +239,9 @@ function SeenProgress({ notice }: { notice: Notice }) {
   );
 }
 
-function NoticeRow({ notice, status, now, onCancel, onReuse }: {
+function NoticeRow({ notice, zones, status, now, onCancel, onReuse }: {
   notice: Notice;
+  zones: readonly ZoneStatus[];
   status: NoticeStatus;
   now: number;
   onCancel: () => void;
@@ -266,6 +271,13 @@ function NoticeRow({ notice, status, now, onCancel, onReuse }: {
         </div>
         <p className="mt-1 line-clamp-2 whitespace-pre-line break-words text-sm text-fg-3">{notice.body}</p>
         <p className="mt-1.5 text-xs text-fg-4">{CATEGORY_LABELS[notice.category] ?? notice.category} · {when}</p>
+        <p className="mt-1 flex items-start gap-1.5 text-xs text-fg-3">
+          {notice.zone_ids?.length ? <MapPin className="mt-px h-3.5 w-3.5 shrink-0 text-fg-4" aria-hidden /> : <Tv className="mt-px h-3.5 w-3.5 shrink-0 text-fg-4" aria-hidden />}
+          <span className="min-w-0 break-words" title={notice.zone_ids?.length ? audienceLabel(notice.zone_ids, zones, 99) : undefined}>
+            <span className="sr-only">Lo reciben: </span>
+            {notice.zone_ids?.length ? `Solo ${audienceLabel(notice.zone_ids, zones, 3)}` : 'Todos los equipos'}
+          </span>
+        </p>
         {status !== 'programado' && <SeenProgress notice={notice} />}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-start">
@@ -280,7 +292,112 @@ function NoticeRow({ notice, status, now, onCancel, onReuse }: {
 // Página
 // ---------------------------------------------------------------------------
 
-export default function NoticesPage({ company, deviceCount }: { company: Company; deviceCount: number | null }) {
+const ZONE_SEARCH_FROM = 10;
+
+/** A quién le llega: todos los equipos o solo los de algunas zonas (se pueden elegir varias). */
+function AudiencePicker({ draft, zones, perZone, total, reach, onMode, onToggle, onAll, goZones }: {
+  draft: Pick<NoticeDraft, 'audience' | 'zoneIds'>;
+  zones: readonly ZoneStatus[];
+  /** Equipos por zona según el listado ya cargado; null si todavía no cargó. */
+  perZone: ((zoneId: string) => number) | null;
+  total: number | null;
+  /** Equipos que lo reciben con lo elegido ahora; null si todavía no se sabe. */
+  reach: number | null;
+  onMode: (mode: 'all' | 'zones') => void;
+  onToggle: (zoneId: string) => void;
+  onAll: (zoneIds: string[]) => void;
+  goZones?: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const groupId = useId();
+  const shown = searchZones(zones, query);
+  const byZone = draft.audience === 'zones';
+  const picked = new Set(draft.zoneIds);
+  const options: { id: 'all' | 'zones'; icon: LucideIcon; title: string; hint: string }[] = [
+    { id: 'all', icon: Tv, title: 'Todos los equipos', hint: total === null ? 'Toda la empresa' : devicesText(total) },
+    { id: 'zones', icon: MapPin, title: 'Solo algunas zonas', hint: zones.length === 0 ? 'Todavía no hay zonas' : `${zones.length} ${zones.length === 1 ? 'zona' : 'zonas'} para elegir` },
+  ];
+  return (
+    <div>
+      <RadioCards
+        label="Quién lo recibe"
+        value={draft.audience}
+        options={['all', 'zones'] as const}
+        onChange={onMode}
+        className="grid gap-2 sm:grid-cols-2"
+        optionClass={(_o, selected) => `px-3 py-3 ${selected ? 'border-accent bg-accent-soft' : 'border-line-strong hover:bg-fill'}`}
+        render={(o, selected) => {
+          const opt = options.find((x) => x.id === o)!;
+          return (
+            <>
+              <span className={`flex items-center gap-2 text-sm font-semibold ${selected ? 'text-fg' : 'text-fg-2'}`}>
+                <opt.icon className={`h-4 w-4 shrink-0 ${selected ? 'text-accent' : 'text-fg-4'}`} aria-hidden />
+                {opt.title}
+              </span>
+              <span className="mt-1 block text-xs text-fg-4">{opt.hint}</span>
+            </>
+          );
+        }}
+      />
+
+      {byZone && (
+        <div className="mt-3 rounded-xl border border-line bg-inset p-3">
+          {zones.length === 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="min-w-0 text-sm text-fg-3">Creá zonas (localidad, nodo u OLT) y asignales equipos para poder avisarle solo a una parte.</p>
+              {goZones && <Button type="button" size="sm" variant="secondary" onClick={goZones}>Crear zonas</Button>}
+            </div>
+          ) : (
+            <>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                <span id={groupId} className={LABEL}>Zonas</span>
+                <span className="flex items-center gap-3 text-xs">
+                  {draft.zoneIds.length < zones.length && (
+                    <button type="button" className="rounded font-medium text-accent underline-offset-2 hover:underline" onClick={() => onAll(zones.map((z) => z.zone_id))}>Elegir todas</button>
+                  )}
+                  {draft.zoneIds.length > 0 && (
+                    <button type="button" className="rounded text-fg-3 underline-offset-2 hover:text-fg hover:underline" onClick={() => onAll([])}>Quitar todas</button>
+                  )}
+                </span>
+              </div>
+              {zones.length >= ZONE_SEARCH_FROM && <SearchInput className="mb-2" value={query} onChange={setQuery} placeholder="Buscar zona" />}
+              <div role="group" aria-labelledby={groupId} className="flex max-h-44 flex-wrap gap-2 overflow-y-auto p-0.5">
+                {shown.map((z) => (
+                  <Chip key={z.zone_id} active={picked.has(z.zone_id)} onClick={() => onToggle(z.zone_id)} count={perZone ? perZone(z.zone_id) : z.total}>
+                    {z.outage_started_at && <span className="h-1.5 w-1.5 rounded-full bg-danger" role="img" aria-label="En caída" />}
+                    <span className="max-w-[12rem] truncate">{z.name}</span>
+                  </Chip>
+                ))}
+                {shown.length === 0 && <p className="px-1 py-1.5 text-sm text-fg-4">Ninguna zona coincide.</p>}
+              </div>
+              <p className={`mt-2.5 text-xs ${draft.zoneIds.length > 0 && reach === 0 ? 'text-warn' : 'text-fg-3'}`} aria-live="polite">
+                {draft.zoneIds.length === 0
+                  ? 'Elegí una o más zonas.'
+                  : reach === null
+                    ? `${draft.zoneIds.length} ${draft.zoneIds.length === 1 ? 'zona elegida' : 'zonas elegidas'}.`
+                    : reach === 0
+                      ? 'Esas zonas no tienen equipos: no lo va a ver nadie.'
+                      : <>Lo {reach === 1 ? 'recibe' : 'reciben'} <span className="font-semibold text-fg">{devicesText(reach)}</span> de {draft.zoneIds.length === 1 ? '1 zona' : `${draft.zoneIds.length} zonas`}{total ? ` (de ${total} en total)` : ''}.</>}
+              </p>
+              {zones.some((z) => z.outage_started_at && picked.has(z.zone_id)) && (
+                <p className="mt-1 text-xs text-fg-4">Los equipos que están sin conexión lo ven cuando vuelven, si el comunicado sigue vigente.</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function NoticesPage({ company, deviceCount, devices = null, zones = [], goZones }: {
+  company: Company;
+  deviceCount: number | null;
+  /** Equipos de la empresa (para contar cuántos hay en las zonas elegidas); null mientras cargan. */
+  devices?: readonly Device[] | null;
+  zones?: readonly ZoneStatus[];
+  goZones?: () => void;
+}) {
   const toast = useToast();
   const [notices, setNotices] = useState<Notice[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -331,7 +448,9 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
   };
 
   const reuse = (n: Notice) => {
-    setDraft({ ...EMPTY_DRAFT, title: n.title, body: n.body, category: n.category, severity: n.severity });
+    // Las zonas que ya no existen no se copian; si no queda ninguna, vuelve a "todos" y hay que elegir a propósito.
+    const zoneIds = (n.zone_ids ?? []).filter((id) => zones.some((z) => z.zone_id === id));
+    setDraft({ ...EMPTY_DRAFT, title: n.title, body: n.body, category: n.category, severity: n.severity, audience: zoneIds.length ? 'zones' : 'all', zoneIds });
     setTemplateId(null);
     setFormError(null);
     titleRef.current?.focus();
@@ -349,7 +468,16 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
 
   const window_ = noticeWindow(draft, now);
   const dirty = draft.title.trim() !== '' || draft.body.trim() !== '';
-  const audience = deviceCount === null ? 'todos los equipos' : deviceCount === 1 ? '1 equipo' : `${deviceCount} equipos`;
+  const targetZones = noticeZones(draft);
+  // A cuántos equipos les llega: por zona se cuenta sobre el listado; si todavía no cargó, con el total que informa cada zona.
+  const reach = targetZones === null
+    ? deviceCount
+    : devices
+      ? audienceCount(devices, targetZones)
+      : zones.filter((z) => targetZones.includes(z.zone_id)).reduce((n, z) => n + z.total, 0);
+  const audience = reach === null ? 'todos los equipos' : devicesText(reach);
+  const audienceName = audienceLabel(targetZones, zones, 3);
+  const audienceLine = targetZones === null ? `Todos los equipos${reach === null ? '' : ` (${reach})`}` : `${audienceName} · ${audience}`;
 
   const review = () => {
     const at = Date.now();
@@ -371,6 +499,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
       await run(db().rpc('mdm_create_notice', {
         p_company: company.id, p_title: draft.title.trim(), p_body: draft.body.trim(),
         p_category: draft.category, p_severity: draft.severity, p_starts_at: w.startsAt, p_expires_at: w.expiresAt,
+        p_zones: noticeZones(draft),
       }));
       toast.show(w.startsAt ? `Comunicado programado para ${formatWhen(w.start, at)}` : 'Comunicado enviado: aparece en los TV en el próximo minuto');
       setDraft(EMPTY_DRAFT);
@@ -410,11 +539,11 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
     <>
       <PageHeader
         title="Comunicados"
-        subtitle={`Mensajes que aparecen en la pantalla de todos los TV de ${company.name}: cortes, alertas del clima, campañas de salud y avisos municipales.`}
+        subtitle={`Mensajes que aparecen en la pantalla de los TV de ${company.name}, en todos o solo en algunas zonas: cortes, alertas del clima, campañas de salud y avisos municipales.`}
       />
 
       <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
-        <Card title="Nuevo comunicado" description={`Lo ven ${audience} la próxima vez que estén encendidos dentro del período que elijas.`}>
+        <Card title="Nuevo comunicado" description="Lo ven los equipos que elijas la próxima vez que estén encendidos dentro del período del comunicado.">
           <form
             className="flex flex-col gap-5"
             onSubmit={(e) => {
@@ -430,6 +559,18 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
                 ))}
               </div>
             </div>
+
+            <AudiencePicker
+              draft={draft}
+              zones={zones}
+              perZone={devices ? (id) => audienceCount(devices, [id]) : null}
+              total={deviceCount}
+              reach={targetZones === null ? null : reach}
+              onMode={(mode) => set('audience', mode)}
+              onToggle={(id) => set('zoneIds', draft.zoneIds.includes(id) ? draft.zoneIds.filter((z) => z !== id) : [...draft.zoneIds, id])}
+              onAll={(ids) => set('zoneIds', ids)}
+              goZones={goZones}
+            />
 
             <RadioCards
               label="Tema"
@@ -553,7 +694,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
               <p className="flex min-w-0 items-center gap-2 text-xs text-fg-3">
                 <CalendarClock className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
                 {window_.ok
-                  ? <span>{draft.startMode === 'now' ? 'Desde ahora' : `Desde ${formatWhen(window_.start, now)}`} hasta {formatWhen(window_.end, now)}.</span>
+                  ? <span>{draft.startMode === 'now' ? 'Desde ahora' : `Desde ${formatWhen(window_.start, now)}`} hasta {formatWhen(window_.end, now)}, para {targetZones === null ? audience : `${audience} de ${audienceName}`}.</span>
                   : <span>{window_.error}.</span>}
               </p>
               <div className="flex items-center gap-2">
@@ -572,7 +713,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
                   : `Enviaste ${sentToday} comunicados en las últimas 24 horas. El máximo es ${NOTICES_PER_DAY}.`}
               </p>
             )}
-            {deviceCount === 0 && (
+            {deviceCount === 0 && targetZones === null && (
               <p className="-mt-2 text-xs text-warn">Todavía no hay equipos vinculados: por ahora no lo va a ver nadie.</p>
             )}
           </form>
@@ -581,6 +722,13 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
         <div className="xl:sticky xl:top-6">
           <Card title="Así se ve en el TV" description={SEVERITY_META[draft.severity].tv}>
             <TvPreview title={draft.title} body={draft.body} category={draft.category} severity={draft.severity} companyName={company.name} />
+            <p className="mt-3 flex items-start gap-2 rounded-lg border border-line bg-fill px-3 py-2 text-[13px] text-fg-2">
+              {targetZones === null ? <Tv className="mt-0.5 h-4 w-4 shrink-0 text-fg-4" aria-hidden /> : <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />}
+              <span className="min-w-0 break-words">
+                <span className="text-fg-4">Lo reciben: </span>
+                {draft.audience === 'zones' && targetZones === null ? <span className="text-fg-4">elegí las zonas</span> : audienceLine}
+              </span>
+            </p>
             <p className="mt-3 text-xs text-fg-4">
               Vista aproximada. El TV avisa al panel cuando lo muestra: así sabés cuántos equipos lo vieron.
             </p>
@@ -614,7 +762,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
           ) : (
             <ul className="divide-y divide-line pb-1">
               {shown.map((n) => (
-                <NoticeRow key={n.id} notice={n} status={statuses.get(n.id)!} now={now} onCancel={() => setCancelTarget(n)} onReuse={() => reuse(n)} />
+                <NoticeRow key={n.id} notice={n} zones={zones} status={statuses.get(n.id)!} now={now} onCancel={() => setCancelTarget(n)} onReuse={() => reuse(n)} />
               ))}
             </ul>
           )}
@@ -625,7 +773,7 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
       {confirming && window_.ok && (
         <Modal
           title={draft.startMode === 'now' ? '¿Enviar este comunicado?' : '¿Programar este comunicado?'}
-          description={`Lo van a ver ${audience} de ${company.name}.`}
+          description={targetZones === null ? `Lo van a ver ${audience} de ${company.name}.` : `Lo van a ver ${audience} de ${company.name}: solo ${targetZones.length === 1 ? 'una zona' : `${targetZones.length} zonas`}.`}
           onClose={() => !sending && setConfirming(false)}
           footer={
             <>
@@ -639,6 +787,10 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
           <div className="flex flex-col gap-4">
             <TvPreview title={draft.title} body={draft.body} category={draft.category} severity={draft.severity} companyName={company.name} />
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+              <dt className="text-fg-4">Lo reciben</dt>
+              <dd className="min-w-0 break-words text-fg-2">
+                {targetZones === null ? audienceLine : <><span className="font-medium text-fg">{audienceLabel(targetZones, zones, 99)}</span> · {audience}</>}
+              </dd>
               <dt className="text-fg-4">Empieza</dt>
               <dd className="text-fg-2">{draft.startMode === 'now' ? 'Ahora (llega a los TV en el próximo minuto)' : formatWhen(window_.start, now)}</dd>
               <dt className="text-fg-4">Termina</dt>
@@ -646,6 +798,12 @@ export default function NoticesPage({ company, deviceCount }: { company: Company
               <dt className="text-fg-4">Aparece como</dt>
               <dd className="text-fg-2">{SEVERITY_META[draft.severity].label} · {CATEGORY_LABELS[draft.category]}</dd>
             </dl>
+            {targetZones !== null && reach === 0 && (
+              <p className="flex items-start gap-2 rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">
+                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                Las zonas elegidas no tienen equipos: por ahora no lo va a ver nadie.
+              </p>
+            )}
             {draft.severity === 'emergencia' && (
               <p className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
                 <Siren className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />

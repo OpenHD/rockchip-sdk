@@ -13,6 +13,7 @@ import {
   KeyRound,
   Lock,
   LockOpen,
+  MapPin,
   Pencil,
   Plus,
   QrCode,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   Tv,
   Unlink,
+  X,
 } from 'lucide-react';
 import {
   db,
@@ -39,6 +41,7 @@ import {
   type ServiceState,
   type StateLogEntry,
   type UnlockCode,
+  type ZoneStatus,
 } from '../api';
 import { HealthPill, HealthSection, NetDiagSection } from '../DeviceHealth';
 import { DEVICE_SORTS, matchesQuery, paginate, sortDevices, type DeviceSort } from '../deviceList';
@@ -51,6 +54,7 @@ import {
   Badge,
   Button,
   Callout,
+  Checkbox,
   Chip,
   Drawer,
   EmptyState,
@@ -71,6 +75,8 @@ import {
   type Tone,
 } from '../ui';
 import type { CompanyData } from '../useCompanyData';
+import { ZoneAssignModal } from '../ZoneDialogs';
+import { matchesZone, NO_ZONE, outageSummary, pageSelection, parseZoneFilter, setSelected, zoneCounts, zoneEventDetail } from '../zones';
 
 // ---------------------------------------------------------------------------
 // Acciones (modales)
@@ -84,7 +90,8 @@ type Dialog =
   | { kind: 'unpair'; device: Device }
   | { kind: 'external-ref'; device: Device }
   | { kind: 'unlock-code'; device: Device; result: UnlockCode }
-  | { kind: 'claim'; code?: string };
+  | { kind: 'claim'; code?: string }
+  | { kind: 'zone'; devices: Device[] };
 
 // RPC de v8 en un solo lugar (contrato NEX MDM v8).
 const rpcUnlockCode = (device: string) => run<UnlockCode>(db().rpc('mdm_unlock_code', { p_device: device }));
@@ -587,6 +594,7 @@ type DrawerTab = 'resumen' | 'salud' | 'historial';
 function DeviceDrawer({
   device,
   company,
+  zone,
   events,
   score,
   inputs,
@@ -597,6 +605,8 @@ function DeviceDrawer({
 }: {
   device: Device;
   company: Company;
+  /** Zona del equipo, si tiene. */
+  zone: ZoneStatus | undefined;
   events: DeviceEvent[];
   score: HealthScore | undefined;
   inputs: HealthInputs | undefined;
@@ -615,7 +625,10 @@ function DeviceDrawer({
   const pay = paymentText(device, company);
   const h = device.health ?? {};
   const issues = healthIssues(device);
-  const history = events.filter((e) => e.device_id === device.id).slice(0, 30);
+  // Los eventos de zona (caída masiva, recuperación) no tienen equipo: se suman los de la zona de este.
+  const history = events
+    .filter((e) => e.device_id === device.id || (e.device_id === null && !!device.zone_id && e.details.zone_id === device.zone_id))
+    .slice(0, 30);
   const state = serviceState(device, company);
   const rDay = restrictDay(device, company);
   const stateLog = useStateLog(device.id, [device.locked, device.restricted, device.paid_until, device.reported_mode].join('|'));
@@ -700,6 +713,11 @@ function DeviceDrawer({
             {device.locked && device.lock_reason && (
               <Callout tone="danger" icon={Lock} title="Bloqueado a mano">Motivo: {device.lock_reason}</Callout>
             )}
+            {zone?.outage_started_at && (
+              <Callout tone="danger" icon={MapPin} title={`Caída en curso en ${zone.name}`}>
+                {outageSummary(zone, now)}. Si este equipo no responde, lo más probable es que sea por la caída de la zona.
+              </Callout>
+            )}
             {device.restricted && (
               <Callout tone="warning" icon={Ban} title="Restringido a mano">{device.restrict_reason ? `Motivo: ${device.restrict_reason}` : 'Sin motivo cargado.'}</Callout>
             )}
@@ -727,6 +745,12 @@ function DeviceDrawer({
                   action={<IconButton icon={Pencil} label="Renombrar equipo" className="-mr-2" onClick={() => onAction({ kind: 'rename', device })} />}
                 >
                   {device.name ?? <span className="text-fg-4">Sin nombre</span>}
+                </InfoRow>
+                <InfoRow
+                  label="Zona"
+                  action={<IconButton icon={Pencil} label="Cambiar la zona del equipo" className="-mr-2" onClick={() => onAction({ kind: 'zone', devices: [device] })} />}
+                >
+                  {zone ? zone.name : <span className="text-fg-4">Sin zona</span>}
                 </InfoRow>
               </dl>
             </section>
@@ -833,6 +857,8 @@ function DeviceDrawer({
                         <>
                           <span title={new Date(e.created_at).toLocaleString('es-AR')}>{relativeTime(e.created_at)}</span>
                           {typeof e.details.domain === 'string' && <> · <span className="font-mono">{e.details.domain}</span></>}
+                          {typeof e.details.zone === 'string' && <> · {e.details.zone}</>}
+                          {zoneEventDetail(e.kind, e.details) && <> · {zoneEventDetail(e.kind, e.details)}</>}
                         </>
                       }
                     />
@@ -855,19 +881,27 @@ export default function DevicesPage({
   company,
   data,
   initialFilter = 'todos',
+  initialZone,
   initialClaim,
   selectedId,
   onSelect,
+  goZones,
 }: {
   company: Company;
   data: CompanyData;
   initialFilter?: string;
+  /** Zona con la que arranca el listado: id de zona o "sin-zona". */
+  initialZone?: string;
+  /** Lleva a la sección Zonas (para crearlas o administrarlas). */
+  goZones?: () => void;
   initialClaim?: string;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
   const toast = useToast();
   const [filter, setFilter] = useState<Filter>(FILTERS.some((f) => f.id === initialFilter) ? (initialFilter as Filter) : 'todos');
+  const [zoneRaw, setZoneRaw] = useState<string | null>(initialZone ?? null);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<DeviceSort>('nombre');
   const [page, setPage] = useState(1);
@@ -875,21 +909,29 @@ export default function DevicesPage({
   const devices = useMemo(() => data.devices ?? [], [data.devices]);
 
   const filterCtx = useMemo(() => ({ health: data.health }), [data.health]);
+  const zones = data.zones;
+  const zoneById = useMemo(() => new Map(zones.map((z) => [z.zone_id, z])), [zones]);
+  const perZone = useMemo(() => zoneCounts(devices), [devices]);
+  // Hasta que cargan las zonas no se sabe si la de la URL existe: se respeta tal cual.
+  const zone = data.devices ? parseZoneFilter(zoneRaw, zones) : zoneRaw;
+  const zoneInfo = zone && zone !== NO_ZONE ? zoneById.get(zone) : undefined;
+  const inZone = useMemo(() => devices.filter((d) => matchesZone(d, zone)), [devices, zone]);
 
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((f) => [f.id, devices.filter((d) => f.test(d, company, filterCtx)).length])),
-    [devices, company, filterCtx],
+    () => Object.fromEntries(FILTERS.map((f) => [f.id, inZone.filter((d) => f.test(d, company, filterCtx)).length])),
+    [inZone, company, filterCtx],
   );
   const matching = useMemo(() => {
     const f = FILTERS.find((x) => x.id === filter)!;
-    return sortDevices(devices.filter((d) => f.test(d, company, filterCtx) && matchesQuery(d, query)), sort, company, data.health);
-  }, [devices, filter, query, sort, company, filterCtx, data.health]);
+    return sortDevices(inZone.filter((d) => f.test(d, company, filterCtx) && matchesQuery(d, query)), sort, company, data.health);
+  }, [inZone, filter, query, sort, company, filterCtx, data.health]);
   const view = paginate(matching, page);
   const shown = view.items;
   const selected = devices.find((d) => d.id === selectedId) ?? null;
-  const narrowed = filter !== 'todos' || query.trim() !== '';
+  const narrowed = filter !== 'todos' || query.trim() !== '' || zone !== null;
   const clear = () => {
     setFilter('todos');
+    setZoneRaw(null);
     setQuery('');
     setPage(1);
   };
@@ -897,6 +939,13 @@ export default function DevicesPage({
     setPage(p);
     document.getElementById('equipos-listado')?.scrollIntoView({ block: 'start' });
   };
+
+  // Selección para acciones en lote. Se guarda por id y sobrevive a cambiar de página o de filtro.
+  const pickedDevices = useMemo(() => devices.filter((d) => picked.has(d.id)), [devices, picked]);
+  const pageIds = shown.map((d) => d.id);
+  const pageState = pageSelection(pageIds, picked);
+  const allMatchingPicked = matching.length > 0 && matching.every((d) => picked.has(d.id));
+  const toggle = (id: string, on: boolean) => setPicked((p) => setSelected(p, [id], on));
 
   const quickUnlock = async (d: Device) => {
     try {
@@ -938,8 +987,27 @@ export default function DevicesPage({
             setPage(1);
           }}
         />
-        <label className="flex items-center gap-2 sm:ml-auto">
-          <span className="shrink-0 text-[13px] text-fg-3">Ordenar</span>
+        {zones.length > 0 && (
+          <label className="flex items-center gap-2 sm:ml-auto">
+            <span className="w-14 shrink-0 text-[13px] text-fg-3 sm:w-auto">Zona</span>
+            <select
+              className={`${inputClass} sm:w-auto sm:max-w-[14rem]`}
+              value={zone ?? ''}
+              onChange={(e) => {
+                setZoneRaw(e.target.value || null);
+                setPage(1);
+              }}
+            >
+              <option value="">Todas las zonas</option>
+              {zones.map((z) => (
+                <option key={z.zone_id} value={z.zone_id}>{z.name} ({perZone.get(z.zone_id) ?? 0}){z.outage_started_at ? ' · en caída' : ''}</option>
+              ))}
+              <option value={NO_ZONE}>Sin zona ({perZone.get(NO_ZONE) ?? 0})</option>
+            </select>
+          </label>
+        )}
+        <label className={`flex items-center gap-2 ${zones.length > 0 ? '' : 'sm:ml-auto'}`}>
+          <span className="w-14 shrink-0 text-[13px] text-fg-3 sm:w-auto">Ordenar</span>
           <select
             className={`${inputClass} sm:w-auto`}
             value={sort}
@@ -970,6 +1038,17 @@ export default function DevicesPage({
 
       {data.devices && <ErrorText error={data.error} />}
 
+      {zoneInfo?.outage_started_at && (
+        <Callout tone="danger" icon={MapPin} title={`Caída en curso en ${zoneInfo.name}`} className="mb-4">
+          {outageSummary(zoneInfo, data.loadedAt || undefined)}.
+        </Callout>
+      )}
+      {data.devices && zones.length === 0 && devices.length > 0 && goZones && (
+        <Callout tone="neutral" icon={MapPin} className="mb-4" action={<Button size="sm" variant="secondary" onClick={goZones}>Crear zonas</Button>}>
+          Agrupá los equipos por localidad o nodo para mandar comunicados a una sola zona y enterarte de las caídas masivas.
+        </Callout>
+      )}
+
       <section id="equipos-listado" aria-label="Listado de equipos" className="scroll-mt-16 rounded-xl border border-line bg-surface shadow-card">
         {!data.devices ? (
           data.error ? (
@@ -986,16 +1065,50 @@ export default function DevicesPage({
             </EmptyState>
           ) : (
             <EmptyState icon={SearchX} title="Ningún equipo coincide" action={narrowed && <Button variant="secondary" onClick={clear}>Quitar filtros</Button>}>
-              Probá con otro filtro o con otra búsqueda.
+              {zone === NO_ZONE && filter === 'todos' && !query.trim() ? 'Todos los equipos tienen una zona asignada.' : 'Probá con otro filtro o con otra búsqueda.'}
             </EmptyState>
           )
         ) : (
           <>
+            {pageState === 'all' && matching.length > shown.length && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-t-xl border-b border-line bg-accent-soft px-4 py-2 text-[13px] text-fg-2 sm:px-5" role="status">
+                {allMatchingPicked ? (
+                  <>Están seleccionados los {matching.length} equipos {narrowed ? 'que coinciden' : 'del listado'}.</>
+                ) : (
+                  <>
+                    Seleccionaste los {shown.length} de esta página.
+                    <button type="button" className="rounded font-medium text-accent underline-offset-2 hover:underline" onClick={() => setPicked((p) => setSelected(p, matching.map((d) => d.id), true))}>
+                      Seleccionar los {matching.length} {narrowed ? 'que coinciden' : 'del listado'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {/* Celular: seleccionar todo */}
+            <div className="flex items-center gap-1 border-b border-line py-1 pl-1.5 pr-4 text-[13px] text-fg-3 md:hidden">
+              <Checkbox
+                label={pageState === 'all' ? 'Quitar de la selección los equipos de esta página' : 'Seleccionar los equipos de esta página'}
+                checked={pageState === 'all'}
+                indeterminate={pageState === 'some'}
+                onChange={(on) => setPicked((p) => setSelected(p, pageIds, on))}
+                className="h-11 w-11"
+              />
+              <span aria-hidden>Seleccionar los de esta página</span>
+            </div>
             {/* Escritorio */}
             <table className="hidden w-full border-separate border-spacing-0 md:table">
               <thead>
                 <tr>
-                  <th scope="col" className={`${th} rounded-tl-xl pl-5`}>Equipo</th>
+                  <th scope="col" className={`${th} w-12 rounded-tl-xl pl-3`}>
+                    <Checkbox
+                      label={pageState === 'all' ? 'Quitar de la selección los equipos de esta página' : 'Seleccionar los equipos de esta página'}
+                      checked={pageState === 'all'}
+                      indeterminate={pageState === 'some'}
+                      onChange={(on) => setPicked((p) => setSelected(p, pageIds, on))}
+                    />
+                  </th>
+                  <th scope="col" className={th}>Equipo</th>
+                  {zones.length > 0 && <th scope="col" className={`${th} hidden xl:table-cell`}>Zona</th>}
                   <th scope="col" className={th}>Estado</th>
                   <th scope="col" className={th}>Salud</th>
                   <th scope="col" className={th}>Conexión</th>
@@ -1011,17 +1124,40 @@ export default function DevicesPage({
                   const pay = paymentText(d, company);
                   const online = isOnline(d);
                   const td = 'border-b border-line py-2.5 align-middle group-last:border-b-0';
+                  const z = d.zone_id ? zoneById.get(d.zone_id) : undefined;
+                  const isPicked = picked.has(d.id);
                   return (
-                    <tr key={d.id} onClick={() => onSelect(d.id)} className={`group cursor-pointer transition ${d.id === selectedId ? 'bg-accent-soft' : 'hover:bg-fill'}`}>
-                      <td className={`${td} max-w-0 pl-5 pr-4 lg:w-[30%]`}>
+                    <tr key={d.id} onClick={() => onSelect(d.id)} className={`group cursor-pointer transition ${d.id === selectedId || isPicked ? 'bg-accent-soft' : 'hover:bg-fill'}`}>
+                      <td className={`${td} w-12 pl-3`} onClick={(e) => e.stopPropagation()}>
+                        <Checkbox label={`Seleccionar ${d.name ?? d.id.slice(0, 8)}`} checked={isPicked} onChange={(on) => toggle(d.id, on)} />
+                      </td>
+                      <td className={`${td} max-w-0 pr-4 lg:w-[28%]`}>
                         <button type="button" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }} className="block max-w-full rounded text-left">
                           <span className={`block truncate text-sm font-medium ${d.name ? 'text-fg' : 'text-fg-3'}`}>{d.name ?? 'Sin nombre'}</span>
                           <span className="block truncate font-mono text-[11px] text-fg-4">
                             {d.id.slice(0, 8)} · {d.firmware_version ?? '—'}{d.external_ref && ` · ${d.external_ref}`}
                           </span>
+                          {z && (
+                            <span className="mt-0.5 flex items-center gap-1 text-xs text-fg-3 xl:hidden">
+                              <MapPin className={`h-3 w-3 shrink-0 ${z.outage_started_at ? 'text-danger' : 'text-fg-4'}`} aria-hidden />
+                              <span className="truncate">{z.name}</span>
+                            </span>
+                          )}
                         </button>
                       </td>
-                      <td className={`${td} max-w-0 pr-4 lg:w-[26%]`}>
+                      {zones.length > 0 && (
+                        <td className={`${td} hidden max-w-0 pr-4 xl:table-cell xl:w-[14%]`}>
+                          {z ? (
+                            <span className="flex items-center gap-1.5 text-sm text-fg-2" title={z.outage_started_at ? `${z.name}: caída en curso` : z.name}>
+                              {z.outage_started_at && <span className="h-2 w-2 shrink-0 rounded-full bg-danger" aria-label="Caída en curso" role="img" />}
+                              <span className="truncate">{z.name}</span>
+                            </span>
+                          ) : (
+                            <span className="text-sm text-fg-4">Sin zona</span>
+                          )}
+                        </td>
+                      )}
+                      <td className={`${td} max-w-0 pr-4 lg:w-[22%]`}>
                         <div className="flex flex-col items-start gap-1">
                           <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
                           {applied === 'pendiente' && <span className="flex items-center gap-1 text-xs text-warn"><Hourglass className="h-3 w-3 shrink-0" aria-hidden /> Pendiente de aplicar</span>}
@@ -1055,6 +1191,7 @@ export default function DevicesPage({
                                 ? { label: 'Quitar restricción', icon: CircleCheck, onClick: () => quickUnrestrict(d) }
                                 : { label: 'Restringir', icon: Ban, onClick: () => setDialog({ kind: 'restrict', device: d }) },
                               { label: 'Renombrar', icon: Pencil, onClick: () => setDialog({ kind: 'rename', device: d }) },
+                              { label: 'Cambiar zona', icon: MapPin, onClick: () => setDialog({ kind: 'zone', devices: [d] }) },
                               { label: 'Desvincular', icon: Unlink, danger: true, onClick: () => setDialog({ kind: 'unpair', device: d }) },
                             ]}
                           />
@@ -1073,9 +1210,12 @@ export default function DevicesPage({
                 const pay = paymentText(d, company);
                 const online = isOnline(d);
                 const issues = healthIssues(d);
+                const z = d.zone_id ? zoneById.get(d.zone_id) : undefined;
+                const isPicked = picked.has(d.id);
                 return (
-                  <li key={d.id}>
-                    <button type="button" onClick={() => onSelect(d.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition active:bg-fill">
+                  <li key={d.id} className={`flex items-center ${isPicked ? 'bg-accent-soft' : ''}`}>
+                    <Checkbox label={`Seleccionar ${d.name ?? d.id.slice(0, 8)}`} checked={isPicked} onChange={(on) => toggle(d.id, on)} className="ml-1.5 h-11 w-11" />
+                    <button type="button" onClick={() => onSelect(d.id)} className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-1 pr-4 text-left transition active:bg-fill">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <StatusDot online={online} />
@@ -1086,10 +1226,11 @@ export default function DevicesPage({
                           {issues.length > 0 && <Badge tone="danger" icon={ShieldAlert}>Alerta</Badge>}
                           <HealthPill score={data.health.get(d.id)} />
                         </div>
-                        <div className="mt-1.5 truncate text-[13px] text-fg-4">
+                        <div className="mt-1.5 text-[13px] text-fg-4">
                           <span className="sr-only">{online ? 'En línea. ' : 'Sin conexión. '}</span>
                           {!online && <>Visto {relativeTime(d.last_seen_at)} · </>}
                           <span className={pay.tone}>{pay.text}</span>
+                          {z && <> · <span className={z.outage_started_at ? 'text-danger' : ''}>{z.name}</span></>}
                         </div>
                       </div>
                       <ChevronRight className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
@@ -1109,11 +1250,31 @@ export default function DevicesPage({
         Los equipos sincronizan cada minuto. Un pago vencido restringe o bloquea el TV aunque no tenga internet.
       </p>
 
+      {pickedDevices.length > 0 && (
+        <>
+          <div className="h-20" aria-hidden />
+          <div
+            role="region"
+            aria-label="Acciones para los equipos seleccionados"
+            className="pointer-events-none fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] z-20 flex justify-center px-3 pb-3 lg:bottom-0 lg:left-[264px] lg:pb-5"
+          >
+            <div className="pointer-events-auto flex w-full max-w-lg animate-[nexIn_.18s_ease-out] items-center gap-2 rounded-xl border border-line-strong bg-overlay py-2 pl-4 pr-2 shadow-pop">
+              <span className="min-w-0 flex-1 truncate text-sm text-fg-2" aria-live="polite">
+                <span className="font-semibold tabular-nums text-fg">{pickedDevices.length}</span> {pickedDevices.length === 1 ? 'seleccionado' : 'seleccionados'}
+              </span>
+              <Button size="sm" icon={MapPin} onClick={() => setDialog({ kind: 'zone', devices: pickedDevices })}>Asignar zona</Button>
+              <IconButton icon={X} label="Quitar la selección" onClick={() => setPicked(new Set())} />
+            </div>
+          </div>
+        </>
+      )}
+
       {selected && (
         <DeviceDrawer
           key={selected.id}
           device={selected}
           company={company}
+          zone={selected.zone_id ? zoneById.get(selected.zone_id) : undefined}
           events={data.events}
           score={data.health.get(selected.id)}
           inputs={data.healthInputs.get(selected.id)}
@@ -1132,6 +1293,19 @@ export default function DevicesPage({
       )}
       {dialog?.kind === 'external-ref' && <ExternalRefModal device={dialog.device} onClose={() => setDialog(null)} onDone={data.reload} />}
       {dialog?.kind === 'unlock-code' && <UnlockCodeModal device={dialog.device} result={dialog.result} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'zone' && (
+        <ZoneAssignModal
+          company={company}
+          devices={dialog.devices}
+          zones={zones}
+          onClose={() => setDialog(null)}
+          onZoneCreated={data.reload}
+          onDone={() => {
+            if (dialog.devices.length > 1) setPicked(new Set());
+            data.reload();
+          }}
+        />
+      )}
       {dialog?.kind === 'claim' && <ClaimModal company={company} initialCode={dialog.code} onClose={() => setDialog(null)} onDone={data.reload} />}
     </>
   );

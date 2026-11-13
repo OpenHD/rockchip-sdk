@@ -9,7 +9,9 @@ import {
   Hourglass,
   Lock,
   LockOpen,
+  MapPin,
   Power,
+  RadioTower,
   RefreshCw,
   ShieldAlert,
   Skull,
@@ -19,7 +21,7 @@ import {
   WifiOff,
   type LucideIcon,
 } from 'lucide-react';
-import { deviceStatus, enforcement, EVENT_LABELS, isOnline, type Company, type DeviceEvent, type DeviceStatus } from '../api';
+import { deviceStatus, enforcement, EVENT_LABELS, isOnline, type Company, type DeviceEvent, type DeviceStatus, type ZoneStatus } from '../api';
 import { HealthSummary } from '../DeviceHealth';
 import { statusBreakdown } from '../deviceList';
 import { healthIssues, STATUS_META, type Filter } from '../deviceMeta';
@@ -27,6 +29,7 @@ import { relativeTime } from '../format';
 import { TONE_DOT, type Tone } from '../tones';
 import { Button, Card, EmptyState, ErrorState, ErrorText, PageHeader, Segmented, Skeleton } from '../ui';
 import type { CompanyData } from '../useCompanyData';
+import { devicesText, NO_ZONE, onlinePercent, outageSince, outageSummary, sortZonesByUrgency, zoneEventDetail, zoneOffline } from '../zones';
 
 const EVENT_ICON: Record<string, LucideIcon> = {
   lock_applied: Lock,
@@ -43,6 +46,8 @@ const EVENT_ICON: Record<string, LucideIcon> = {
   piracy_attempt: Skull,
   agent_started: Power,
   test: Bell,
+  zone_outage: RadioTower,
+  zone_restored: Wifi,
 };
 
 const SEVERITY_RING: Record<DeviceEvent['severity'], string> = {
@@ -160,15 +165,139 @@ function FleetCard({ company, devices, online, goDevices }: { company: Company; 
   );
 }
 
+const ZONES_SHOWN = 8;
+
+/**
+ * Caídas por zona. Con una caída en curso va arriba de todo y en rojo: zona, cuántos equipos no responden y desde cuándo.
+ * Sin caídas muestra cada zona con su proporción de equipos en línea, para ver de un vistazo cómo está la red.
+ */
+function ZonesCard({ zones, unzoned, now, goDevices, goZones }: {
+  zones: readonly ZoneStatus[];
+  unzoned: number;
+  now: number;
+  goDevices: (filter: string, zone?: string) => void;
+  goZones: () => void;
+}) {
+  const sorted = useMemo(() => sortZonesByUrgency(zones), [zones]);
+  const outages = sorted.filter((z) => z.outage_started_at);
+  // Sin caída: primero las que tienen equipos; las vacías no dicen nada de la red.
+  const healthy = [...sorted.filter((z) => !z.outage_started_at && z.total > 0), ...sorted.filter((z) => !z.outage_started_at && z.total === 0)];
+  const shown = healthy.slice(0, Math.max(0, ZONES_SHOWN - outages.length));
+  const down = outages.length > 0;
+
+  if (zones.length === 0) {
+    return (
+      <Card title="Caídas por zona" description="Enterate cuando se caen muchos equipos del mismo lugar a la vez">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <p className="flex min-w-0 max-w-2xl items-start gap-2.5 text-sm text-fg-3">
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-fg-4" aria-hidden />
+            Agrupá los equipos por localidad, nodo u OLT. Si la mitad de una zona se queda sin conexión, lo ves acá y te llega el aviso.
+          </p>
+          <Button size="sm" variant="secondary" onClick={goZones}>Crear zonas</Button>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          Caídas por zona
+          {down && <span className="inline-flex items-center gap-1 rounded-md bg-danger-soft px-1.5 py-0.5 text-xs font-medium text-danger ring-1 ring-inset ring-danger">{outages.length} en curso</span>}
+        </span>
+      }
+      description={down ? 'Muchos equipos del mismo lugar sin conexión a la vez' : `Sin caídas en curso en ${zones.length === 1 ? 'la zona' : `las ${zones.length} zonas`}`}
+      action={<Button size="sm" variant="secondary" onClick={goZones}>Ver zonas</Button>}
+      className={down ? 'border-danger' : ''}
+      padded={false}
+    >
+      {down && (
+        <ul className="divide-y divide-line" aria-label="Caídas en curso">
+          {outages.map((z) => (
+            <li key={z.zone_id}>
+              <button
+                type="button"
+                onClick={() => goDevices('offline', z.zone_id)}
+                aria-label={`${z.name}: ${outageSummary(z, now)}. Ver equipos sin conexión`}
+                className="group flex w-full items-center gap-3 bg-danger-soft px-4 py-3.5 text-left transition hover:brightness-110 sm:px-5"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger-soft text-danger ring-1 ring-inset ring-danger">
+                  <RadioTower className="h-5 w-5" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words text-[15px] font-semibold text-fg">{z.name}</span>
+                  <span className="block text-sm text-fg-2">
+                    <span className="font-semibold tabular-nums text-danger">{zoneOffline(z)} de {z.total}</span> sin conexión
+                    <span className="text-fg-3"> · {outageSince(z, now)}</span>
+                  </span>
+                </span>
+                <span className="hidden shrink-0 text-[13px] font-medium text-fg-2 sm:block">Ver equipos</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-fg-4 transition group-hover:translate-x-0.5 group-hover:text-fg-2" aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {shown.length > 0 && (
+        <ul className={`grid gap-px overflow-hidden sm:grid-cols-2 xl:grid-cols-4 ${down ? 'border-t border-line' : ''}`} aria-label={down ? 'Zonas sin caída' : 'Zonas'}>
+          {shown.map((z) => {
+            const pct = onlinePercent(z);
+            return (
+              <li key={z.zone_id} className="shadow-[1px_0_0_0_var(--line),0_1px_0_0_var(--line)]">
+                <button
+                  type="button"
+                  onClick={() => goDevices('todos', z.zone_id)}
+                  aria-label={`${z.name}: ${z.online} de ${devicesText(z.total)} en línea. Ver equipos`}
+                  className="flex w-full flex-col gap-2 px-4 py-3 text-left transition hover:bg-fill sm:px-5"
+                >
+                  <span className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 truncate text-sm font-medium text-fg">{z.name}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-fg-3">
+                      {z.total === 0 ? 'Sin equipos' : <><span className="font-semibold text-fg-2">{z.online}</span> de {z.total} en línea</>}
+                    </span>
+                  </span>
+                  <span className="h-1.5 overflow-hidden rounded-full bg-fill-2" aria-hidden>
+                    <span className="block h-full rounded-full bg-ok transition-all" style={{ width: `${pct}%` }} />
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {(healthy.length > shown.length || unzoned > 0) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-2.5 text-[13px] text-fg-3 sm:px-5">
+          {healthy.length > shown.length && (
+            <button type="button" onClick={goZones} className="rounded underline-offset-4 transition hover:text-fg hover:underline">
+              Y {healthy.length - shown.length} {healthy.length - shown.length === 1 ? 'zona más sin caída' : 'zonas más sin caída'}
+            </button>
+          )}
+          {unzoned > 0 && (
+            <button type="button" onClick={() => goDevices('todos', NO_ZONE)} className="rounded underline-offset-4 transition hover:text-fg hover:underline">
+              {devicesText(unzoned)} sin zona
+            </button>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function OverviewPage({
   company,
   data,
   goDevices,
+  goZones,
   openDevice,
 }: {
   company: Company;
   data: CompanyData;
-  goDevices: (filter: string) => void;
+  /** Abre Equipos con un filtro de estado y, si se pasa, una zona (id o "sin-zona"). */
+  goDevices: (filter: string, zone?: string) => void;
+  goZones: () => void;
   openDevice: (id: string) => void;
 }) {
   const [onlyAlerts, setOnlyAlerts] = useState(true);
@@ -213,6 +342,11 @@ export default function OverviewPage({
     return items.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'danger' ? -1 : 1));
   }, [devices, company, data.health]);
 
+  const unzoned = useMemo(() => devices.filter((d) => !d.zone_id).length, [devices]);
+  const zoneIds = useMemo(() => new Set(data.zones.map((z) => z.zone_id)), [data.zones]);
+  const hasOutage = data.zones.some((z) => z.outage_started_at);
+  const zonesCard = <ZonesCard zones={data.zones} unzoned={unzoned} now={data.loadedAt} goDevices={goDevices} goZones={goZones} />;
+
   const events = onlyAlerts ? data.events.filter((e) => e.severity !== 'info') : data.events;
   const ATTENTION_MAX = 8;
 
@@ -256,6 +390,8 @@ export default function OverviewPage({
         </Card>
       ) : (
         <div className="flex flex-col gap-4 lg:gap-5">
+          {/* Una caída masiva es lo primero que hay que ver; sin caídas, las zonas van más abajo. */}
+          {hasOutage && zonesCard}
           <div className="grid gap-4 lg:gap-5 xl:grid-cols-5">
             <FleetCard company={company} devices={devices} online={stats.online} goDevices={goDevices} />
             <HealthSummary scores={data.health.values()} onOpenLow={() => goDevices('salud-baja')} className="xl:col-span-2" />
@@ -267,6 +403,8 @@ export default function OverviewPage({
             <Kpi label="Por vencer" hint={`Vencen en ${company.payment_warning_days} días o menos`} value={stats.dueSoon} icon={Clock} tone="warning" onClick={() => goDevices('por-vencer')} />
             <Kpi label="Alertas de seguridad" hint="Equipos para revisar" value={stats.security} icon={ShieldAlert} tone="danger" onClick={() => goDevices('alertas')} />
           </div>
+
+          {!hasOutage && zonesCard}
 
           <div className="grid gap-4 lg:gap-5 xl:grid-cols-5">
             <Card
@@ -343,9 +481,18 @@ export default function OverviewPage({
                               <button type="button" className="rounded text-fg-2 underline-offset-2 hover:text-accent hover:underline" onClick={() => openDevice(e.device_id!)}>
                                 {names.get(e.device_id) ?? e.device_id.slice(0, 8)}
                               </button>
+                            ) : typeof e.details.zone === 'string' ? (
+                              typeof e.details.zone_id === 'string' && zoneIds.has(e.details.zone_id) ? (
+                                <button type="button" className="rounded text-fg-2 underline-offset-2 hover:text-accent hover:underline" onClick={() => goDevices('todos', e.details.zone_id as string)}>
+                                  {e.details.zone}
+                                </button>
+                              ) : (
+                                e.details.zone
+                              )
                             ) : (
                               company.name
                             )}
+                            {zoneEventDetail(e.kind, e.details) && <> · {zoneEventDetail(e.kind, e.details)}</>}
                             {typeof e.details.domain === 'string' && <> · <span className="font-mono text-xs">{e.details.domain}</span></>}
                             {typeof e.details.lock_kind === 'string' && e.details.lock_kind && <> · motivo: {e.details.lock_kind}</>}
                           </div>
