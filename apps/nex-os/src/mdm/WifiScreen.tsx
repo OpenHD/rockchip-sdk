@@ -1,318 +1,459 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, Lock, RefreshCw, Wifi, WifiHigh, WifiLow, WifiOff, WifiZero, type LucideIcon } from 'lucide-react';
-import type { MdmWifi, MdmWifiNetwork } from './agentState';
-import { useDpad } from './dpad';
-import { OnScreenKeyboard } from './OnScreenKeyboard';
-import { isValidPsk, relayErrorText, sendRelay } from './relay';
-import { tvButton } from './styles';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { Card, Icon, IconBadge, InfoRow, OkHint, SectionLabel, Shell, SignalBars, StatusDot, ActionRow } from './TvUi';
+import { ICON, ROW, TONE, type Tone } from './tvStyle';
+import {
+  connectedSsid,
+  networkDetail,
+  parseWifiScan,
+  parseWifiStatus,
+  passwordError,
+  signalLabel,
+  type WifiNetwork,
+  type WifiStatus,
+} from './wifi';
 
 /**
- * Configuración de Wi-Fi desde el control remoto. Disponible aunque el equipo esté
- * bloqueado: un equipo bloqueado por falta de conexión necesita poder volver a conectarse.
- * La contraseña solo vive en el estado de la pantalla mientras se escribe; al enviarla se borra.
+ * Wi-Fi del equipo: lista de redes, formulario de contraseña (o de "Otra red") y avance de la conexión.
+ * "Atrás" deshace un paso: del formulario a la lista y de la lista a la pantalla anterior.
  */
 
-const STATE_LABELS: Record<string, string> = {
-  connected: 'Conectado',
-  completed: 'Conectado',
-  connecting: 'Conectando…',
-  associating: 'Conectando…',
-  authenticating: 'Conectando…',
-  obtaining_ip: 'Obteniendo dirección IP…',
-  scanning: 'Buscando redes…',
-  disconnected: 'Desconectado',
-  inactive: 'Desconectado',
-  failed: 'No se pudo conectar',
-  wrong_password: 'Contraseña incorrecta',
-  no_iface: 'Sin placa Wi-Fi',
-  disabled: 'Wi-Fi apagado',
-};
+type Feedback = { kind: 'info' | 'error'; text: string };
 
-const SCAN_TIMEOUT_MS = 20_000;
-const CONNECT_TIMEOUT_MS = 60_000;
+const CONNECT_TIMEOUT_MS = 25000;
+const STATUS_POLL_MS = 1500;
+const CONNECT_FAILED = 'No se pudo conectar. Revisá la contraseña.';
 
-function isConnected(wifi: MdmWifi | null): boolean {
-  return !!wifi && (wifi.state === 'connected' || wifi.state === 'completed');
+async function request(path: string): Promise<unknown> {
+  const res = await fetch(`/agent/wifi/${path}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Wi-Fi no disponible');
+  return res.json();
 }
 
-function signalIcon(dbm: number): LucideIcon {
-  if (dbm >= -55) return Wifi;
-  if (dbm >= -67) return WifiHigh;
-  if (dbm >= -75) return WifiLow;
-  return WifiZero;
+function Spinner({ className }: { className: string }) {
+  return <span className={`inline-block rounded-full border-4 border-white/15 border-t-sky-300 animate-spin ${className}`} aria-hidden />;
 }
 
-/** Una entrada por SSID (la de mejor señal), ordenadas de mejor a peor. */
-function networks(scan: MdmWifiNetwork[]): MdmWifiNetwork[] {
-  const best = new Map<string, MdmWifiNetwork>();
-  for (const n of scan) {
-    const prev = best.get(n.ssid);
-    if (!prev || n.signal > prev.signal) best.set(n.ssid, n);
-  }
-  return [...best.values()].sort((a, b) => b.signal - a.signal);
+/** Lo que está pasando (buscando, error): arriba de la lista o del formulario, donde ya está la vista. */
+function FeedbackBar({ feedback }: { feedback: Feedback | null }) {
+  const error = feedback?.kind === 'error';
+  return (
+    <div role="status" aria-live="polite">
+      {feedback && (
+        <div className={`flex items-center rounded-2xl border px-6 py-4 mb-6 text-2xl ${error ? 'border-red-400/50 bg-red-500/10 text-red-100' : 'border-sky-300/30 bg-sky-400/10 text-sky-100'}`}>
+          {error ? <Icon d={ICON.alert} className="flex-none h-8 w-8 mr-4 text-red-300" /> : <Spinner className="flex-none h-7 w-7 mr-4" />}
+          <span className="min-w-0">{feedback.text}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
-type Notice = { tone: 'info' | 'ok' | 'error'; text: string } | null;
+/** Conexión actual del equipo. */
+function ConnectionCard({ status }: { status: WifiStatus | null }) {
+  const ssid = connectedSsid(status);
+  const wired = status?.ethernet === true;
+  const online = wired || (status?.connected ?? false);
+  const tone: Tone = online ? 'sky' : 'amber';
+  return (
+    <Card>
+      <SectionLabel>Conexión actual</SectionLabel>
+      <div className="flex items-center pt-2 pb-8">
+        <IconBadge icon={wired ? ICON.cable : online ? ICON.wifi : ICON.wifiOff} tone={tone} />
+        <div className="flex-1 min-w-0">
+          <div className="text-4xl font-semibold truncate">{wired ? 'Cable de red' : ssid ?? (online ? 'Wi-Fi' : 'Sin conexión')}</div>
+          <div className={`mt-2 inline-flex items-center rounded-full border px-4 py-1 text-xl ${online ? 'border-emerald-300/40 bg-emerald-400/15 text-emerald-200' : 'border-amber-300/40 bg-amber-400/15 text-amber-200'}`}>
+            <StatusDot ok={online} />
+            {online ? 'Conectado' : 'Elegí una red'}
+          </div>
+        </div>
+      </div>
+      {status && status.connected && !wired && (
+        <InfoRow icon={ICON.pulse} label="Señal">
+          <span className="inline-flex items-center justify-end">
+            <SignalBars level={status.level} />
+            {signalLabel(status.level)}
+          </span>
+        </InfoRow>
+      )}
+      {status?.ip && <InfoRow icon={ICON.pin} label="Dirección IP"><span className="tabular-nums">{status.ip}</span></InfoRow>}
+    </Card>
+  );
+}
 
-export default function WifiScreen({ wifi, onClose }: { wifi: MdmWifi | null; onClose: () => void }) {
-  const [entry, setEntry] = useState<string | null>(null);
-  const [notice, setNotice] = useState<Notice>(null);
-  const [scanSince, setScanSince] = useState<number | null>(null);
-  const [connecting, setConnecting] = useState<{ ssid: string; since: number } | null>(null);
-  const [confirmForget, setConfirmForget] = useState(false);
-  const scannedAt = wifi?.scannedAt ?? null;
+function Step({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <li className="flex items-start py-3">
+      <span className="flex-none h-9 w-9 rounded-full border border-white/25 flex items-center justify-center text-xl text-white/75 mr-4">{n}</span>
+      <span className="text-2xl leading-9 text-white/70">{children}</span>
+    </li>
+  );
+}
 
-  const scan = async () => {
-    const since = Math.floor(Date.now() / 1000);
-    setScanSince(since);
-    const res = await sendRelay({ action: 'wifi_scan' });
-    if (!res.ok) {
-      setScanSince(null);
-      setNotice({ tone: 'error', text: relayErrorText(res.error) });
-    }
-  };
+/** Cómo se escribe con el control: el teclado en pantalla no es obvio la primera vez. */
+function TypingTips() {
+  return (
+    <div className="mt-6">
+      <Card>
+        <SectionLabel>Escribir con el control</SectionLabel>
+        <ol className="pb-3">
+          <Step n={1}>Presioná <b className="text-white">OK</b> sobre un campo para abrir el teclado.</Step>
+          <Step n={2}>Al terminar, elegí <b className="text-white">Siguiente</b> o <b className="text-white">Listo</b> en el teclado.</Step>
+          <Step n={3}><b className="text-white">Atrás</b> cierra el teclado sin borrar lo escrito.</Step>
+        </ol>
+      </Card>
+    </div>
+  );
+}
 
-  // Al abrir, busca redes una vez.
-  const scanRef = useRef(scan);
-  useEffect(() => {
-    scanRef.current();
+/** Campo de texto grande: ícono, etiqueta y borde que se enciende con el foco. */
+function Field({ icon, label, hint, children }: { icon: string; label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="flex-1 min-w-0 block">
+      <span className="block text-2xl text-white/70 mb-2">{label}</span>
+      <span className="flex items-center h-20 rounded-2xl border border-white/15 bg-white/5 px-6 focus-within:border-white/70 focus-within:bg-white/10 focus-within:ring-4 focus-within:ring-sky-300/40">
+        <Icon d={icon} className="flex-none h-8 w-8 text-white/45 mr-4" />
+        {children}
+      </span>
+      {hint && <span className="block text-xl text-white/45 mt-2">{hint}</span>}
+    </label>
+  );
+}
+
+const INPUT = 'flex-1 min-w-0 h-full bg-transparent text-3xl text-white outline-none select-text placeholder:text-white/30';
+const BUTTON =
+  'flex-none h-20 rounded-2xl border text-3xl font-semibold outline-none transition-transform ' +
+  'focus:scale-105 focus:border-white focus:bg-white focus:text-[#05070c] focus:ring-4 focus:ring-sky-300/50';
+
+/** Red local: el token solo se publica en el origen privado del agente. */
+export default function WifiScreen({ token, dim, onClose }: { token: string | null; dim?: boolean; onClose: () => void }) {
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const alive = useRef(true);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [status, setStatus] = useState<WifiStatus | null>(null);
+  const [networks, setNetworks] = useState<WifiNetwork[]>([]);
+  const [unavailable, setUnavailable] = useState(!token);
+  const [scanning, setScanning] = useState(false);
+  const [selected, setSelected] = useState<WifiNetwork | 'manual' | null>(null);
+  const [ssid, setSsid] = useState('');
+  const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
+  /** Red a la que se está intentando conectar (pantalla de avance). */
+  const [connecting, setConnecting] = useState<string | null>(null);
+  /** El equipo ya aceptó el pedido: se espera a que la red aparezca conectada. */
+  const [target, setTarget] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Cada error devuelve el foco al campo para corregir.
+  const [attempt, setAttempt] = useState(0);
+  const [fieldFocus, setFieldFocus] = useState<'ssid' | 'password'>('password');
+
+  const fail = useCallback((text: string) => {
+    setConnecting(null);
+    setTarget(null);
+    setError(text);
+    setAttempt((n) => n + 1);
   }, []);
 
-  // La búsqueda termina cuando llega un escaneo más nuevo o se vence la espera.
-  const scanning = scanSince !== null && !(scannedAt !== null && scannedAt >= scanSince - 1);
-  useEffect(() => {
-    if (scanSince === null) return;
-    const t = setTimeout(() => setScanSince(null), SCAN_TIMEOUT_MS);
-    return () => clearTimeout(t);
-  }, [scanSince]);
+  const scan = useCallback(async () => {
+    if (!token) return;
+    setScanning(true);
+    setError(null);
+    try {
+      const data = parseWifiScan(await request('scan'));
+      if (!alive.current) return;
+      setStatus(data.status);
+      setNetworks(data.networks);
+      setUnavailable(false);
+    } catch {
+      if (alive.current) setUnavailable(true);
+    }
+    if (alive.current) setScanning(false);
+  }, [token]);
 
-  // Resultado de la conexión, según lo que publica el agente.
-  const connectedSsid = isConnected(wifi) ? wifi?.ssid : null;
-  const wifiError = wifi?.error ?? null;
-  const connectDone = !!connecting && connectedSsid === connecting.ssid;
   useEffect(() => {
-    if (!connecting || connectDone) return;
-    const t = setTimeout(() => {
-      setNotice({ tone: 'error', text: wifiError ?? `No se pudo conectar a ${connecting.ssid}. Revisá la contraseña.` });
+    alive.current = true;
+    const scanTimer = setTimeout(() => void scan(), 0);
+    return () => { alive.current = false; clearTimeout(scanTimer); clearTimeout(timer.current); };
+  }, [scan]);
+
+  // Tras pedir la conexión, se consulta el estado hasta que la red quede conectada o se acabe el tiempo.
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    const timeout = setTimeout(() => {
+      cancelled = true;
+      clearTimeout(timer.current);
+      fail(CONNECT_FAILED);
+    }, CONNECT_TIMEOUT_MS);
+    const poll = async () => {
+      try {
+        const next = parseWifiStatus(await request('status'));
+        if (cancelled) return;
+        setStatus(next);
+        if (next && next.connected && next.ssid === target) {
+          clearTimeout(timeout);
+          setDone(target);
+          timer.current = setTimeout(onClose, 2000);
+          return;
+        }
+      } catch {
+        // Una lectura fallida no interrumpe el intento de conexión.
+      }
+      if (cancelled) return;
+      timer.current = setTimeout(poll, STATUS_POLL_MS);
+    };
+    timer.current = setTimeout(poll, STATUS_POLL_MS);
+    return () => { cancelled = true; clearTimeout(timeout); clearTimeout(timer.current); };
+  }, [target, onClose, fail]);
+
+  const connect = async (name: string, pass: string, listed: boolean) => {
+    if (connecting) return;
+    const invalid = passwordError(pass, listed);
+    if (invalid) { setError(invalid); setFieldFocus('password'); setAttempt((n) => n + 1); return; }
+    setError(null);
+    setConnecting(name);
+    try {
+      const data = await request(`connect?ssid=${encodeURIComponent(name)}&password=${encodeURIComponent(pass)}&token=${encodeURIComponent(token ?? '')}`);
+      if (!alive.current) return;
+      const o = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+      if (o.ok !== true) {
+        fail(typeof o.error === 'string' && o.error ? o.error.slice(0, 200) : CONNECT_FAILED);
+        return;
+      }
+      setTarget(name);
+    } catch {
+      if (alive.current) { setConnecting(null); setUnavailable(true); }
+    }
+  };
+
+  const choose = (network: WifiNetwork | 'manual') => {
+    setError(null);
+    setPassword('');
+    setShow(false);
+    // Una red abierta no pide nada: se conecta directo.
+    if (network !== 'manual' && !network.secure) { void connect(network.ssid, '', false); return; }
+    setSsid(network === 'manual' ? '' : network.ssid);
+    setFieldFocus(network === 'manual' ? 'ssid' : 'password');
+    setSelected(network);
+  };
+
+  const manual = selected === 'manual';
+  const submit = () => void connect(ssid, password, selected !== null && !manual);
+  const phase = unavailable ? 'unavailable' : done ? 'done' : connecting ? 'connecting' : selected ? 'form' : 'list';
+
+  // "Atrás" deshace un paso.
+  const back = useCallback(() => {
+    if (phase === 'connecting') {
       setConnecting(null);
-    }, Math.max(0, connecting.since + CONNECT_TIMEOUT_MS - Date.now()));
-    return () => clearTimeout(t);
-  }, [connecting, connectDone, wifiError]);
-
-  const shownNotice: Notice = connecting
-    ? connectDone
-      ? { tone: 'ok', text: `Conectado a ${connecting.ssid}` }
-      : { tone: 'info', text: `Conectando a ${connecting.ssid}…` }
-    : notice;
-
-  const connect = async (ssid: string, psk: string) => {
-    setEntry(null);
-    setConnecting(null);
-    setNotice({ tone: 'info', text: `Conectando a ${ssid}…` });
-    const res = await sendRelay({ action: 'wifi_connect', ssid, psk });
-    if (res.ok) setConnecting({ ssid, since: Date.now() });
-    else setNotice({ tone: 'error', text: relayErrorText(res.error) });
-  };
-
-  const forget = async () => {
-    if (!confirmForget) {
-      setConfirmForget(true);
-      return;
+      setTarget(null);
+    } else if (phase === 'form') {
+      setSelected(null);
+      setError(null);
+    } else {
+      onClose();
     }
-    setConfirmForget(false);
-    setConnecting(null);
-    const res = await sendRelay({ action: 'wifi_forget' });
-    setNotice(res.ok ? { tone: 'info', text: 'Red olvidada. Elegí otra para conectarte.' } : { tone: 'error', text: relayErrorText(res.error) });
+  }, [phase, onClose]);
+
+  const current = connectedSsid(status);
+  const backLabel = phase === 'connecting' ? 'Cancelar' : phase === 'form' ? 'Volver a la lista' : 'Volver';
+  const focusKey = phase === 'form' ? fieldFocus : phase === 'list' ? 'first' : 'back';
+
+  // OK sobre un campo vacío abre el teclado; con texto, "Siguiente"/"Listo" (o Enter) avanza.
+  const onFieldEnter = (e: ReactKeyboardEvent<HTMLInputElement>, next: () => void) => {
+    if (e.key !== 'Enter' || !e.currentTarget.value) return;
+    e.preventDefault();
+    next();
   };
 
-  const pick = (n: MdmWifiNetwork) => {
-    setConfirmForget(false);
-    if (n.secure) setEntry(n.ssid);
-    else connect(n.ssid, '');
-  };
-
-  if (entry !== null) {
-    return <PasswordEntry ssid={entry} onCancel={() => setEntry(null)} onSubmit={(psk) => connect(entry, psk)} />;
-  }
-  return (
-    <NetworkList
-      wifi={wifi}
-      notice={shownNotice}
-      scanning={scanning}
-      confirmForget={confirmForget}
-      onScan={scan}
-      onForget={forget}
-      onPick={pick}
-      onClose={onClose}
-    />
-  );
-}
-
-function NetworkList({
-  wifi,
-  notice,
-  scanning,
-  confirmForget,
-  onScan,
-  onForget,
-  onPick,
-  onClose,
-}: {
-  wifi: MdmWifi | null;
-  notice: Notice;
-  scanning: boolean;
-  confirmForget: boolean;
-  onScan: () => void;
-  onForget: () => void;
-  onPick: (n: MdmWifiNetwork) => void;
-  onClose: () => void;
-}) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  useDpad(rootRef, { onBack: onClose });
-  const list = useMemo(() => networks(wifi?.scan ?? []), [wifi?.scan]);
-  const connected = isConnected(wifi);
-  const stateLabel = wifi?.state ? STATE_LABELS[wifi.state] ?? wifi.state : 'Sin datos';
-
-  return (
-    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col gap-8 tv-safe select-none">
-      <header className="flex items-center gap-6">
-        <button autoFocus className={tvButton} onClick={onClose}>
-          <ArrowLeft className="h-6 w-6" aria-hidden /> Volver
-        </button>
-        <h1 className="text-4xl font-semibold">Wi-Fi</h1>
-      </header>
-
-      <div className="flex flex-1 min-h-0 gap-10">
-        <section className="w-[28rem] shrink-0 flex flex-col gap-6">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 flex flex-col gap-3 text-lg">
-            <div className="flex items-center gap-3 text-2xl">
-              {connected ? <Wifi className="h-7 w-7 text-emerald-400" aria-hidden /> : <WifiOff className="h-7 w-7 text-white/50" aria-hidden />}
-              {stateLabel}
-            </div>
-            <div className="text-white/70">Red: <span className="text-white">{wifi?.ssid ?? '—'}</span></div>
-            <div className="text-white/70">IP: <span className="text-white font-mono">{wifi?.ip ?? '—'}</span></div>
-            {wifi?.error && <div className="text-rose-300">{wifi.error}</div>}
-          </div>
-          {notice && (
-            <p
-              role="status"
-              className={`rounded-xl px-5 py-4 text-lg ${
-                notice.tone === 'error' ? 'bg-rose-500/15 text-rose-200' : notice.tone === 'ok' ? 'bg-emerald-500/15 text-emerald-200' : 'bg-sky-500/15 text-sky-100'
-              }`}
-            >
-              {notice.text}
+  let body: ReactNode;
+  if (phase === 'unavailable') {
+    body = (
+      <div className="flex flex-col items-center text-center pt-24">
+        <span className={`h-28 w-28 rounded-full border flex items-center justify-center ${TONE.muted}`}>
+          <Icon d={ICON.lock} className="h-14 w-14" />
+        </span>
+        <h2 className="text-5xl font-semibold mt-8">La red la administra tu proveedor</h2>
+        <p className="text-2xl text-white/60 mt-4">Desde este equipo no se puede cambiar. Si necesitás ayuda, comunicate con tu proveedor.</p>
+      </div>
+    );
+  } else if (phase === 'connecting' || phase === 'done') {
+    body = (
+      <div role="status" aria-live="polite" className="flex flex-col items-center text-center pt-24">
+        <span className="relative h-28 w-28 flex-none">
+          {!done && <Spinner className="absolute top-0 left-0 h-full w-full" />}
+          <span className={`absolute top-3 left-3 h-[5.5rem] w-[5.5rem] rounded-full border flex items-center justify-center ${done ? TONE.emerald : TONE.sky}`}>
+            <Icon d={done ? ICON.check : ICON.wifi} className="h-11 w-11" />
+          </span>
+        </span>
+        <h2 className="text-5xl font-semibold mt-8 max-w-full truncate">{done ? `Conectado a ${done}` : `Conectando a ${connecting}…`}</h2>
+        <p className="text-2xl text-white/60 mt-4">
+          {done ? 'Listo. Volviendo a la pantalla anterior…' : 'Puede tardar unos segundos. Presioná Atrás para cancelar.'}
+        </p>
+      </div>
+    );
+  } else if (selected) {
+    const network = manual ? null : (selected as WifiNetwork);
+    body = (
+      <>
+        <FeedbackBar feedback={error ? { kind: 'error', text: error } : null} />
+        <SectionLabel>{manual ? 'Otra red' : 'Conectarte a'}</SectionLabel>
+        <div className="flex items-center mb-8">
+          <IconBadge icon={manual ? ICON.plus : ICON.wifi} tone="sky" />
+          <div className="flex-1 min-w-0">
+            <h2 className="text-4xl font-semibold truncate">{network ? network.ssid : 'Una red que no aparece en la lista'}</h2>
+            <p className="text-2xl text-white/60 truncate">
+              {network ? `${networkDetail(network, current)} · Señal ${signalLabel(network.level).toLowerCase()}` : 'Escribí el nombre tal cual figura en el módem, con mayúsculas y minúsculas.'}
             </p>
-          )}
-          <div className="flex flex-col gap-3">
-            <button className={tvButton} onClick={onScan}>
-              <RefreshCw className={`h-6 w-6 ${scanning ? 'animate-spin' : ''}`} aria-hidden />
-              {scanning ? 'Buscando redes…' : 'Buscar redes'}
-            </button>
-            {wifi?.ssid && (
-              <button className={`${tvButton} ${confirmForget ? 'bg-rose-500/40' : ''}`} onClick={onForget}>
-                {confirmForget ? `¿Olvidar ${wifi.ssid}? Apretá OK de nuevo` : 'Olvidar esta red'}
-              </button>
-            )}
           </div>
-        </section>
+          {network && <SignalBars level={network.level} />}
+        </div>
 
-        <section className="flex-1 min-w-0 flex flex-col gap-3">
-          <h2 className="text-xl text-white/60">Redes disponibles</h2>
-          {list.length === 0 ? (
-            <p className="text-white/60 text-lg">{scanning ? 'Buscando redes…' : 'No se encontraron redes. Probá buscar de nuevo.'}</p>
-          ) : (
-            <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 p-2">
-              {list.map((n) => {
-                const Icon = signalIcon(n.signal);
-                const current = connected && wifi?.ssid === n.ssid;
-                return (
-                  <button
-                    key={n.ssid}
-                    onClick={() => onPick(n)}
-                    className="flex items-center gap-5 rounded-2xl bg-white/5 border border-white/10 px-6 py-4 text-left text-xl outline-none transition focus:bg-white focus:text-black focus:ring-4 focus:ring-sky-400/70"
-                  >
-                    <Icon className="h-7 w-7 shrink-0" aria-label={`Señal ${n.signal} dBm`} />
-                    <span className="flex-1 truncate">{n.ssid}</span>
-                    {current && <span className="text-base text-emerald-500">Conectada</span>}
-                    {n.secure && <Lock className="h-5 w-5 shrink-0 opacity-70" aria-label="Protegida con contraseña" />}
-                  </button>
-                );
-              })}
-            </div>
+        {manual && (
+          <div className="flex mb-6">
+            <Field icon={ICON.wifi} label="Nombre de la red">
+              <input
+                data-nav
+                data-key="ssid"
+                aria-label="Nombre de red"
+                value={ssid}
+                maxLength={32}
+                placeholder="Presioná OK para escribir"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="next"
+                onChange={(e) => setSsid(e.target.value)}
+                onKeyDown={(e) => onFieldEnter(e, () => passwordRef.current?.focus())}
+                className={INPUT}
+              />
+            </Field>
+          </div>
+        )}
+
+        <div className="flex items-start">
+          <Field icon={ICON.lock} label="Contraseña" hint={manual ? 'Dejala vacía si la red es abierta. Si tiene contraseña, entre 8 y 63 caracteres.' : 'Entre 8 y 63 caracteres.'}>
+            <input
+              ref={passwordRef}
+              data-nav
+              data-key="password"
+              data-row="password"
+              aria-label="Contraseña"
+              type={show ? 'text' : 'password'}
+              value={password}
+              maxLength={63}
+              placeholder="Presioná OK para escribir"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="go"
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => onFieldEnter(e, submit)}
+              className={INPUT}
+            />
+          </Field>
+          {/* Alineado con el campo (debajo de la etiqueta): se llega con ▶ desde el final de la contraseña. */}
+          <button
+            data-nav
+            data-row="password"
+            aria-pressed={show}
+            onClick={() => setShow(!show)}
+            className="flex-none h-20 mt-10 ml-4 px-6 rounded-2xl border border-white/15 bg-white/5 flex items-center text-2xl text-white/75 outline-none focus:border-white/70 focus:bg-white/15 focus:text-white focus:ring-4 focus:ring-sky-300/40"
+          >
+            <Icon d={show ? ICON.eyeOff : ICON.eye} className="h-8 w-8 mr-3" />
+            {show ? 'Ocultar' : 'Mostrar'}
+          </button>
+        </div>
+
+        <div className="flex items-center mt-10">
+          <button data-nav data-row="actions" onClick={submit} className={`${BUTTON} px-14 border-sky-400 bg-sky-400 text-[#05070c]`}>
+            Conectar
+          </button>
+          <button data-nav data-row="actions" onClick={back} className={`${BUTTON} px-10 ml-6 border-white/25 bg-white/10 text-white`}>
+            Cancelar
+          </button>
+        </div>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <FeedbackBar feedback={error ? { kind: 'error', text: error } : scanning ? { kind: 'info', text: 'Buscando redes…' } : null} />
+        <SectionLabel>Redes cercanas</SectionLabel>
+        <div className="flex flex-col space-y-3">
+          {networks.map((n, i) => {
+            const isCurrent = n.ssid === current;
+            return (
+              <button
+                key={n.ssid}
+                data-nav
+                data-key={i === 0 ? 'first' : undefined}
+                data-index={i === 0 ? 0 : undefined}
+                disabled={n.unsupported}
+                onClick={() => choose(n)}
+                className={`${ROW} py-4 border-white/10 bg-white/5 disabled:opacity-40`}
+              >
+                <IconBadge icon={ICON.wifi} tone={isCurrent ? 'emerald' : 'muted'} small />
+                <span className="flex-1 min-w-0 flex flex-col mr-6">
+                  <span className="text-3xl font-semibold truncate">{n.ssid}</span>
+                  <span className={`text-xl truncate ${isCurrent ? 'text-emerald-300' : 'text-white/60'}`}>{networkDetail(n, current)}</span>
+                </span>
+                {n.secure && <Icon d={ICON.lock} className="flex-none h-7 w-7 text-white/45 mr-5" />}
+                <SignalBars level={n.level} />
+                {!n.unsupported && <OkHint idle="" action={isCurrent ? 'Reconectar' : 'Conectar'} />}
+              </button>
+            );
+          })}
+          {networks.length === 0 && !scanning && (
+            <p className="rounded-2xl border border-white/10 px-6 py-5 text-2xl text-white/60">No se encontraron redes cerca. Acercá el equipo al módem y buscá de nuevo.</p>
           )}
-        </section>
-      </div>
-    </div>
-  );
-}
-
-const MAX_PSK = 63;
-
-function PasswordEntry({ ssid, onCancel, onSubmit }: { ssid: string; onCancel: () => void; onSubmit: (psk: string) => void }) {
-  const [psk, setPsk] = useState('');
-  const [show, setShow] = useState(false);
-  const [hint, setHint] = useState<string | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const valid = psk.length > 0 && isValidPsk(psk);
-
-  const add = (c: string) => {
-    setHint(null);
-    setPsk((p) => (p.length < MAX_PSK ? p + c : p));
-  };
-  const submit = () => {
-    if (!valid) {
-      setHint('La contraseña tiene que tener entre 8 y 63 caracteres.');
-      return;
-    }
-    const value = psk;
-    setPsk('');
-    onSubmit(value);
-  };
-
-  useDpad(rootRef, {
-    onBack: onCancel,
-    // Teclado físico o números del control: escriben directo.
-    onKey: (e) => {
-      if (e.ctrlKey || e.altKey || e.metaKey) return false;
-      if (e.key === 'Backspace' && psk.length > 0) {
-        setPsk((p) => p.slice(0, -1));
-        return true;
-      }
-      if (e.key.length === 1 && e.key >= ' ' && e.key <= '~') {
-        add(e.key);
-        return true;
-      }
-      return false;
-    },
-  });
+          <ActionRow
+            navKey={networks.length === 0 ? 'first' : 'other'}
+            index={networks.length === 0 ? 0 : undefined}
+            compact
+            icon={ICON.plus}
+            tone="muted"
+            title="Otra red"
+            detail="Para una red oculta o que no aparece en la lista."
+            idle=""
+            action="Escribir"
+            onSelect={() => choose('manual')}
+          />
+          <ActionRow
+            navKey="scan"
+            compact
+            icon={ICON.refresh}
+            tone="muted"
+            title="Buscar de nuevo"
+            detail="Actualiza la lista de redes cercanas."
+            idle=""
+            action="Buscar"
+            onSelect={() => void scan()}
+          />
+        </div>
+      </>
+    );
+  }
 
   return (
-    <div ref={rootRef} className="w-screen h-screen bg-[#05070c] text-white flex flex-col items-center justify-center gap-8 tv-safe select-none">
-      <div className="text-center">
-        <p className="text-xl text-white/60">Contraseña de la red</p>
-        <h1 className="text-4xl font-semibold mt-1">{ssid}</h1>
-      </div>
-      <div className="flex items-center gap-4">
-        <div className="w-[40rem] min-h-16 rounded-2xl border-2 border-sky-400/60 bg-white/5 px-6 py-4 font-mono text-3xl tracking-wider break-all">
-          {psk.length === 0 ? <span className="text-white/50">Escribí la contraseña</span> : show ? psk : '•'.repeat(psk.length)}
-          <span className="ml-1 inline-block w-0.5 h-8 align-middle bg-sky-400 animate-pulse" aria-hidden />
-        </div>
-        <button className={tvButton} onClick={() => setShow((s) => !s)}>
-          {show ? <EyeOff className="h-6 w-6" aria-hidden /> : <Eye className="h-6 w-6" aria-hidden />}
-          {show ? 'Ocultar' : 'Mostrar'}
-        </button>
-      </div>
-      <p className={`text-lg ${hint ? 'text-rose-300' : 'text-white/60'}`}>
-        {hint ?? `${psk.length} caracteres · mínimo 8`}
-      </p>
-      <OnScreenKeyboard
-        onChar={add}
-        onBackspace={() => setPsk((p) => p.slice(0, -1))}
-        onSubmit={submit}
-        canSubmit={valid}
-        submitLabel="Conectar"
-      />
-      <button className={tvButton} onClick={onCancel}>Cancelar</button>
-    </div>
+    <Shell
+      overlay
+      title="Red Wi-Fi"
+      backLabel={backLabel}
+      okLabel={phase === 'form' ? 'Elegir o abrir el teclado' : 'Elegir'}
+      focusKey={focusKey}
+      focusToken={`${phase}|${networks.length > 0}|${attempt}`}
+      dim={dim}
+      onBack={back}
+      aside={
+        <>
+          <ConnectionCard status={status} />
+          {phase === 'form' && <TypingTips />}
+        </>
+      }
+    >
+      {body}
+    </Shell>
   );
 }

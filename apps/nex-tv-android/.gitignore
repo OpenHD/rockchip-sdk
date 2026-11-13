@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+# NEX-OS compilado: lo copia build.sh desde apps/nex-os
+app/src/main/assets/www/
+# Configuración del MDM (URL y clave del proyecto Supabase)
+nex.properties

@@ -4,87 +4,57 @@ import { useEffect, useState } from 'react';
  * Estado que publica nex-agent en /agent/ui-state.json (ver docs/GESTION_REMOTA.md).
  * Es de solo lectura: la UI nunca decide si el equipo está bloqueado, solo lo muestra.
  */
-export type MdmMode = 'starting' | 'unpaired' | 'locked' | 'restricted' | 'active';
+export type MdmMode = 'starting' | 'unpaired' | 'locked' | 'active';
 export type MdmLockKind = 'manual' | 'payment' | 'clock' | 'offline';
-/** Restringido: el menú y la red funcionan, las apps no (ver "Estados del equipo" en la doc). */
-export type MdmRestrictKind = 'manual' | 'payment';
 
 export interface MdmApp {
   id: string;
   name: string;
   kind: 'web' | 'internal';
   launch_url: string | null;
-  /** La empresa habilitó pasarle al servicio la atestación del equipo (JWT). */
-  pass_attestation: boolean;
-  /** En modo restringido las apps se muestran, pero no se pueden abrir. */
-  disabled: boolean;
+  /** Ícono real de una app Android, servido por el agente. null: la UI dibuja uno de línea. */
+  icon: string | null;
+  /** App de Play Store que la empresa habilitó y todavía no está instalada: al elegirla se abre su página en Play Store. */
+  install: boolean;
 }
 
-/** Datos para que el usuario pague (los define el ISP en el panel). */
-export interface MdmPayment {
-  /** Fecha de vencimiento (YYYY-MM-DD). */
-  due: string | null;
-  phone: string | null;
-  /** https: se muestra como QR para abrir en el celular. */
-  url: string | null;
-  message: string | null;
-}
+export type NoticeCategory = 'corte' | 'clima' | 'salud' | 'municipal' | 'general';
+export type NoticeSeverity = 'info' | 'importante' | 'emergencia';
 
-export interface MdmWifiNetwork {
-  ssid: string;
-  /** dBm (negativo; más cerca de 0 = mejor señal). */
-  signal: number;
-  secure: boolean;
-}
-
-export interface MdmWifi {
-  iface: string | null;
-  state: string | null;
-  ssid: string | null;
-  ip: string | null;
-  scan: MdmWifiNetwork[];
-  scannedAt: number | null;
-  error: string | null;
-}
-
-export type MdmUnlockResult = 'ok' | 'invalid' | 'rate_limited' | 'unavailable';
-
-export interface MdmUnlock {
-  result: MdmUnlockResult | null;
-  /** Epoch (s) del último intento procesado por el agente. */
-  at: number | null;
-  /** Epoch (s) hasta el que dura el desbloqueo por código. */
-  until: number | null;
-}
-
-export type MdmUpdateState = 'downloading' | 'verifying' | 'installing' | 'failed';
-
-export interface MdmUpdate {
-  state: MdmUpdateState;
-  version: string | null;
+/** Aviso de la empresa para este equipo. Texto plano: nunca se interpreta como HTML. */
+export interface MdmNotice {
+  id: string;
+  title: string;
+  body: string;
+  category: NoticeCategory;
+  severity: NoticeSeverity;
+  /** Vencimiento, en segundos Unix. */
+  expiresAt: number;
 }
 
 export interface MdmState {
   mode: MdmMode;
+  wifiToken: string | null;
+  /** false: NEX todavía no es dueño del equipo (instalación incompleta). */
+  owner: boolean;
+  /** El equipo tiene root: el técnico puede activar NEX desde la TV. */
+  root: boolean;
   logo: string | null;
   companyName: string | null;
   deviceName: string | null;
   lockKind: MdmLockKind | null;
-  restrictKind: MdmRestrictKind | null;
-  /** Aviso de pago próximo a vencer (banner fijo en el home). */
-  serviceWarning: boolean;
-  payment: MdmPayment | null;
   lockMessage: string | null;
   lockReason: string | null;
   paymentDue: string | null;
   pairingCode: string | null;
   pairingExpiresAt: string | null;
   apps: MdmApp[];
-  wifi: MdmWifi | null;
-  unlock: MdmUnlock;
-  /** JWT de atestación: solo en modo 'active'. */
-  attestation: string | null;
-  update: MdmUpdate | null;
+  /** Avisos que este equipo todavía no marcó como leídos, del más grave al más leve (máximo 5). */
+  notices: MdmNotice[];
+  /** Versión instalada de NEX TV (la publica el agente de Android). null: el agente no la informa. */
+  version: string | null;
+  /** Número de compilación de NEX TV. null: el agente no lo informa. */
+  build: number | null;
 }
 
 export const isMdmBuild = import.meta.env.VITE_NEX_MDM === '1';
@@ -92,129 +62,49 @@ export const isMdmBuild = import.meta.env.VITE_NEX_MDM === '1';
 const STATE_URL = '/agent/ui-state.json';
 const POLL_MS = 3000;
 const STALE_MS = 15000;
-/**
- * El agente reescribe el archivo en cada vuelta (cada ~5 s; una vuelta con
- * sync lento puede tardar ~1 min). Si deja de hacerlo, el archivo en /run
- * sigue ahí con el último estado: pasado este margen se lo ignora (falla cerrado).
- */
-const AGENT_DEAD_MS = 120000;
-const MODES: readonly MdmMode[] = ['starting', 'unpaired', 'locked', 'restricted', 'active'];
+const MODES: readonly MdmMode[] = ['starting', 'unpaired', 'locked', 'active'];
 const LOCK_KINDS: readonly MdmLockKind[] = ['manual', 'payment', 'clock', 'offline'];
-const RESTRICT_KINDS: readonly MdmRestrictKind[] = ['manual', 'payment'];
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const PHONE_RE = /^[0-9 +()-]{5,32}$/;
-const UNLOCK_RESULTS: readonly MdmUnlockResult[] = ['ok', 'invalid', 'rate_limited', 'unavailable'];
-const UPDATE_STATES: readonly MdmUpdateState[] = ['downloading', 'verifying', 'installing', 'failed'];
-const MAX_SCAN = 40;
-/** JWT compacto (header.payload.firma en base64url) y de tamaño acotado. */
-const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
-const NO_UNLOCK: MdmUnlock = { result: null, at: null, until: null };
+const NOTICE_CATEGORIES: readonly NoticeCategory[] = ['corte', 'clima', 'salud', 'municipal', 'general'];
+/** Del más leve al más grave: la posición es el rango. */
+export const NOTICE_SEVERITIES: readonly NoticeSeverity[] = ['info', 'importante', 'emergencia'];
+export const MAX_NOTICES = 5;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Única forma válida de la URL de instalación: el origen local del agente y un nombre de paquete Android. */
+const PLAY_INSTALL_URL = /^https:\/\/appassets\.androidplatform\.net\/android-play\/[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 
 const STARTING: MdmState = {
   mode: 'starting',
+  wifiToken: null,
+  owner: true,
+  root: false,
   logo: null,
   companyName: null,
   deviceName: null,
   lockKind: null,
-  restrictKind: null,
-  serviceWarning: false,
-  payment: null,
   lockMessage: null,
   lockReason: null,
   paymentDue: null,
   pairingCode: null,
   pairingExpiresAt: null,
   apps: [],
-  wifi: null,
-  unlock: NO_UNLOCK,
-  attestation: null,
-  update: null,
+  notices: [],
+  version: null,
+  build: null,
 };
 
 function str(v: unknown, max = 280): string | null {
   return typeof v === 'string' && v.length > 0 ? v.slice(0, max) : null;
 }
 
-/** Entero acotado (epoch, dBm…); cualquier otra cosa es null. */
-function int(v: unknown, min: number, max: number): number | null {
-  return typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : null;
+/** Solo versiones con forma de versión ("0.1.0", "1.4.2-beta"): cualquier otro texto se descarta. */
+const VERSION = /^\d{1,5}(\.\d{1,5}){1,3}([-+][0-9A-Za-z.]{1,16})?$/;
+
+function parseVersion(v: unknown): string | null {
+  return typeof v === 'string' && VERSION.test(v) ? v : null;
 }
 
-function obj(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
-
-const EPOCH_MAX = 2 ** 32;
-
-function parseNetwork(v: unknown): MdmWifiNetwork | null {
-  const o = obj(v);
-  if (!o) return null;
-  const ssid = str(o.ssid, 32);
-  const signal = int(o.signal, -127, 0);
-  if (!ssid || signal === null) return null;
-  return { ssid, signal, secure: o.secure !== false };
-}
-
-function parseWifi(v: unknown): MdmWifi | null {
-  const o = obj(v);
-  if (!o) return null;
-  const state = str(o.state, 24);
-  const ip = str(o.ip, 45);
-  return {
-    iface: str(o.iface, 16),
-    state: state && /^[a-z_]+$/.test(state) ? state : null,
-    ssid: str(o.ssid, 32),
-    ip: ip && /^[0-9a-fA-F.:]+$/.test(ip) ? ip : null,
-    scan: Array.isArray(o.scan)
-      ? o.scan
-          .slice(0, MAX_SCAN)
-          .map(parseNetwork)
-          .filter((n): n is MdmWifiNetwork => n !== null)
-      : [],
-    scannedAt: int(o.scanned_at, 0, EPOCH_MAX),
-    error: str(o.error, 160),
-  };
-}
-
-function parseUnlock(v: unknown): MdmUnlock {
-  const o = obj(v);
-  if (!o) return NO_UNLOCK;
-  return {
-    result: UNLOCK_RESULTS.find((r) => r === o.result) ?? null,
-    at: int(o.at, 0, EPOCH_MAX),
-    until: int(o.until, 0, EPOCH_MAX),
-  };
-}
-
-function parseUpdate(v: unknown): MdmUpdate | null {
-  const o = obj(v);
-  const state = o && UPDATE_STATES.find((s) => s === o.state);
-  if (!o || !state) return null;
-  return { state, version: str(o.version, 32) };
-}
-
-function httpsUrl(v: unknown, max = 300): string | null {
-  const raw = str(v, max + 1);
-  if (!raw || raw.length > max) return null;
-  try {
-    const url = new URL(raw);
-    return url.protocol === 'https:' ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
-function parsePayment(v: unknown): MdmPayment | null {
-  const o = obj(v);
-  if (!o) return null;
-  const due = str(o.due, 10);
-  const phone = str(o.phone, 32);
-  return {
-    due: due && DATE_RE.test(due) ? due : null,
-    phone: phone && PHONE_RE.test(phone) ? phone : null,
-    url: httpsUrl(o.url),
-    message: str(o.message),
-  };
+function parseBuild(v: unknown): number | null {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 }
 
 function parseApp(v: unknown): MdmApp | null {
@@ -223,9 +113,14 @@ function parseApp(v: unknown): MdmApp | null {
   const id = str(o.id, 41);
   const name = str(o.name, 60);
   if (!id || !name || (o.kind !== 'web' && o.kind !== 'internal')) return null;
-  // Deshabilitada (modo restringido): sin URL, nunca se abre.
-  if (o.disabled === true) return { id, name, kind: o.kind, launch_url: null, pass_attestation: false, disabled: true };
   let launchUrl: string | null = null;
+  if (o.install === true) {
+    // Se compara el texto tal cual llega (sin normalizar con URL): cualquier otra forma se descarta.
+    if (o.kind !== 'web' || typeof o.launch_url !== 'string' || o.launch_url.length > 300) return null;
+    if (!id.startsWith('play:') || !PLAY_INSTALL_URL.test(o.launch_url)) return null;
+    // Todavía no hay ícono real: la UI dibuja un mosaico con la inicial.
+    return { id, name, kind: 'web', launch_url: o.launch_url, icon: null, install: true };
+  }
   if (o.kind === 'web') {
     try {
       const url = new URL(String(o.launch_url));
@@ -235,48 +130,82 @@ function parseApp(v: unknown): MdmApp | null {
       return null;
     }
   }
-  return { id, name, kind: o.kind, launch_url: launchUrl, pass_attestation: o.pass_attestation === true, disabled: false };
+  // Solo la ruta local del agente: por este campo la UI no carga imágenes de afuera.
+  const icon = typeof o.icon === 'string' && /^\/agent\/icon\/[\w.]+$/.test(o.icon) ? o.icon : null;
+  return { id, name, kind: o.kind, launch_url: launchUrl, icon, install: false };
 }
 
-/**
- * Valida todo lo que llega del archivo: ante cualquier duda, 'starting' (pantalla de espera).
- * Un estado viejo (agente caído) también cuenta como duda.
- */
-export function parseAgentState(raw: unknown, now = Date.now()): MdmState {
+function parseNotice(v: unknown): MdmNotice | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.id !== 'string' || !UUID.test(o.id)) return null;
+  const title = typeof o.title === 'string' ? o.title.trim().slice(0, 80) : '';
+  if (!title) return null;
+  if (typeof o.expires_at !== 'number' || !Number.isFinite(o.expires_at) || o.expires_at <= 0) return null;
+  // Un aviso con gravedad desconocida se descarta: mostrarlo de más o de menos sería un error.
+  const severity = NOTICE_SEVERITIES.find((s) => s === o.severity);
+  if (!severity) return null;
+  const body = typeof o.body === 'string'
+    ? o.body.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500)
+    : '';
+  return {
+    id: o.id.toLowerCase(),
+    title,
+    body,
+    category: NOTICE_CATEGORIES.find((c) => c === o.category) ?? 'general',
+    severity,
+    expiresAt: o.expires_at,
+  };
+}
+
+function parseNotices(v: unknown): MdmNotice[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: MdmNotice[] = [];
+  for (const item of v) {
+    const n = parseNotice(item);
+    if (!n || seen.has(n.id)) continue;
+    seen.add(n.id);
+    out.push(n);
+  }
+  // El agente ya los manda ordenados; se reordena igual para no depender de eso.
+  const rank = (n: MdmNotice) => NOTICE_SEVERITIES.indexOf(n.severity);
+  return out
+    .map((n, i) => ({ n, i }))
+    .sort((a, b) => rank(b.n) - rank(a.n) || a.i - b.i)
+    .map((x) => x.n)
+    .slice(0, MAX_NOTICES);
+}
+
+/** Valida todo lo que llega del archivo: ante cualquier duda, 'starting' (pantalla de espera). */
+export function parseAgentState(raw: unknown): MdmState {
   if (!raw || typeof raw !== 'object') return STARTING;
   const o = raw as Record<string, unknown>;
   const mode = MODES.find((m) => m === o.mode);
   if (!mode) return STARTING;
-  if (typeof o.updated_at !== 'number' || now - o.updated_at * 1000 > AGENT_DEAD_MS) return STARTING;
   const logo = str(o.logo, 64);
   const lockKind = LOCK_KINDS.find((k) => k === o.lock_kind) ?? null;
-  const jwt = str(o.attestation, 4096);
   return {
     mode,
+    wifiToken: str(o.wifi_token, 64),
+    // El agente de Linux no publica "owner": ahí no aplica.
+    owner: o.owner !== false,
+    root: o.root === true,
     logo: logo && /^\/agent\/logo\.(png|jpg|webp)$/.test(logo) ? logo : null,
     companyName: str(o.company_name, 80),
     deviceName: str(o.device_name, 80),
     lockKind,
-    restrictKind: mode === 'restricted' ? (RESTRICT_KINDS.find((k) => k === o.restrict_kind) ?? 'manual') : null,
-    serviceWarning: mode === 'active' && o.service_warning === true,
-    payment: parsePayment(o.payment),
     lockMessage: str(o.lock_message),
     lockReason: str(o.lock_reason),
     paymentDue: str(o.payment_due, 10),
     pairingCode: str(o.pairing_code, 8),
     pairingExpiresAt: str(o.pairing_expires_at, 40),
     apps: Array.isArray(o.apps)
-      ? o.apps
-          .map(parseApp)
-          .filter((a): a is MdmApp => a !== null)
-          // Fuera del modo activo ninguna app se puede abrir, diga lo que diga el archivo.
-          .map((a) => (mode === 'active' ? a : { ...a, launch_url: null, pass_attestation: false, disabled: true }))
+      ? o.apps.map(parseApp).filter((a): a is MdmApp => a !== null)
       : [],
-    wifi: parseWifi(o.wifi),
-    unlock: parseUnlock(o.unlock),
-    // Solo con el equipo activo: un equipo bloqueado nunca presenta atestación.
-    attestation: mode === 'active' && jwt && JWT_RE.test(jwt) ? jwt : null,
-    update: parseUpdate(o.update),
+    notices: parseNotices(o.notices),
+    version: parseVersion(o.version),
+    build: parseBuild(o.build),
   };
 }
 
