@@ -49,6 +49,24 @@ export const PROBLEMS: Problem[] = [
   },
   {
     area: 'Instalación',
+    symptom: 'blindar-box dice que lo que escucha en el puerto 40000 es "un programa compartido del sistema" o que "ningún servicio de init lo arranca".',
+    cause: 'La puerta trasera de ese firmware está armada distinto a la del TX6698 conocido. El script no toca nada que no pueda identificar con seguridad.',
+    fix: 'No se cambió nada en el box. No lo entregues: necesita la reparación completa del firmware. Mandale a NEX la salida completa del script.',
+  },
+  {
+    area: 'Instalación',
+    symptom: 'blindar-box avisa "sin adb root, su se deja como está".',
+    cause: 'El firmware no permite que el técnico tenga root por ADB. Si se le sacara el root a su, nadie podría volver a instalar NEX en ese equipo.',
+    fix: 'El puerto 40000 igual queda cerrado. El panel va a seguir mostrando root en el equipo como dato. Avisale a NEX qué modelo y firmware es.',
+  },
+  {
+    area: 'Instalación',
+    symptom: 'install-system o grabar-logo dicen "su no da root" en un box que ya pasó por blindar-box.',
+    cause: 'Es lo esperado: el blindaje le sacó el root a su para que ninguna app lo use.',
+    fix: 'install-system entra solo con el root del técnico por ADB. grabar-logo no: si hace falta el logo, primero ./restaurar-blindaje.sh, grabá el logo y volvé a blindar.',
+  },
+  {
+    area: 'Instalación',
     symptom: 'install-system o grabar-logo dicen "su no da root en este equipo".',
     cause: 'El firmware no trae acceso de administrador (root).',
     fix: 'Igual que el caso anterior: sin root no se puede copiar NEX al sistema ni grabar el logo. Consultá a NEX antes de seguir.',
@@ -69,7 +87,7 @@ export const PROBLEMS: Problem[] = [
     area: 'Instalación',
     symptom: 'La verificación marca "falta el permiso…" o "NEX no es app privilegiada".',
     cause: 'El firmware no le dio a NEX los permisos de app de sistema.',
-    fix: 'No sigas con el paso 3. Sin esos permisos NEX no se actualiza sola ni instala las apps del operador. Mandale a NEX la salida completa.',
+    fix: 'No sigas con los pasos siguientes. Sin esos permisos NEX no se actualiza sola ni instala las apps del operador. Mandale a NEX la salida completa.',
   },
   {
     area: 'Instalación',
@@ -81,13 +99,13 @@ export const PROBLEMS: Problem[] = [
     area: 'Instalación',
     symptom: 'install-box termina con "ADB queda ABIERTO: hay verificaciones que fallaron".',
     cause: 'Alguna comprobación dio ✗ (por ejemplo, quedó una app de publicidad activa o la zona horaria no se aplicó).',
-    fix: 'Leé qué línea tiene la ✗ y volvé a correr el paso 3: se puede repetir las veces que haga falta. Si la misma línea falla dos veces, mandale la salida a NEX. El ADB queda abierto a propósito para que puedas corregir.',
+    fix: 'Leé qué línea tiene la ✗ y volvé a correr el paso 4 (install-box): se puede repetir las veces que haga falta. Si la misma línea falla dos veces, mandale la salida a NEX. El ADB queda abierto a propósito para que puedas corregir.',
   },
   {
     area: 'Instalación',
     symptom: 'install-box avisa "hay cuentas cargadas: quitarlas y volver a correr el script".',
     cause: 'El firmware permite que NEX sea dueño del equipo, pero Android lo rechaza si hay una cuenta de Google iniciada.',
-    fix: 'Quitá las cuentas (o hacé un reset de fábrica sin iniciar sesión en Google) y corré el paso 3 otra vez. La cuenta se puede volver a cargar después.',
+    fix: 'Quitá las cuentas (o hacé un reset de fábrica sin iniciar sesión en Google) y corré el paso 4 (install-box) otra vez. La cuenta se puede volver a cargar después.',
   },
   {
     area: 'Instalación',
@@ -224,7 +242,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: '¿Puedo repetir un paso si algo salió mal?',
-    a: 'Sí. Los tres scripts se pueden volver a correr sin riesgo: revisan el equipo antes de tocar nada y, si ya estaba hecho, lo dejan igual. Lo único que no podés repetir sin abrir de nuevo el ADB es el paso 3, porque al terminar bien lo apaga.',
+    a: 'Sí. Los scripts se pueden volver a correr sin riesgo: revisan el equipo antes de tocar nada y, si ya estaba hecho, lo dejan igual. Lo único que no podés repetir sin abrir de nuevo el ADB es el paso 4 (install-box), porque al terminar bien lo apaga.',
   },
   {
     q: '¿Puedo probar antes sin cambiar nada?',

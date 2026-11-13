@@ -62,7 +62,7 @@ const TOC: { group: string; items: SectionMeta[] }[] = [
   {
     group: 'Empezar',
     items: [
-      { id: 'inicio', title: 'Instalación en 5 pasos', icon: ListChecks },
+      { id: 'inicio', title: 'Lista de instalación', icon: ListChecks },
       { id: 'necesitas', title: 'Qué necesitás', icon: Package },
     ],
   },
@@ -298,7 +298,8 @@ const CHECKLIST: { id: string; text: string; go: SectionId }[] = [
   { id: 'adb', text: 'El box está en mi misma red, con la Depuración USB encendida, y sé su IP.', go: 'preparar' },
   { id: 'system', text: 'Paso 1: install-system terminó con "Listo" (NEX quedó en el sistema).', go: 'instalar' },
   { id: 'logo', text: 'Paso 2 (opcional): grabar-logo terminó con "grabada y verificada".', go: 'instalar' },
-  { id: 'box', text: 'Paso 3: install-box terminó con "Listo", todas las líneas con ✓ y el ADB apagado.', go: 'instalar' },
+  { id: 'blindar', text: 'Paso 3: blindar-box terminó con "Listo" y "puerto 40000 cerrado".', go: 'instalar' },
+  { id: 'box', text: 'Paso 4: install-box terminó con "Listo", todas las líneas con ✓ y el ADB apagado.', go: 'instalar' },
   { id: 'link', text: 'El box está vinculado: aparece en Equipos con el nombre del cliente.', go: 'vincular' },
   { id: 'entrega', text: 'En el domicilio: tiene red, la versión es la correcta y el cliente vio cómo se usa.', go: 'cliente' },
 ];
@@ -577,7 +578,7 @@ export default function GuidePage({ company }: { company: Company }) {
           <Section {...sec('necesitas')} lead="Juntá todo antes de abrir la primera caja. Con esto instalás cualquier cantidad de equipos.">
             <H3>Descargas</H3>
             <div className="flex flex-col gap-2">
-              <DownloadRow path={KIT_PATH} name={`kit-instalacion-${GUIDE_VERSION}.zip`} title={`Kit de instalación ${GUIDE_VERSION}`} detail="Los tres scripts, nex-tv.apk, el logo de NEX y un archivo LEEME. Es lo que vas a usar." />
+              <DownloadRow path={KIT_PATH} name={`kit-instalacion-${GUIDE_VERSION}.zip`} title={`Kit de instalación ${GUIDE_VERSION}`} detail="Los scripts de instalación y blindaje, nex-tv.apk, el logo de NEX y un archivo LEEME. Es lo que vas a usar." />
               <DownloadRow path={APK_PATH} name="nex-tv.apk" title="Solo el APK de NEX TV" detail="Por si ya tenés el kit y solo te falta la app. Es el mismo archivo que trae el kit." />
             </div>
             <p className="text-sm leading-6 text-fg-3">
@@ -723,8 +724,21 @@ export default function GuidePage({ company }: { company: Company }) {
             </Bullets>
             <p>Salió bien si dice <Code>✓ grabada y verificada</Code>. El logo nuevo se ve en el próximo reinicio.</p>
 
-            <H3>Paso 3 · Instalar, proteger y apagar el ADB (1 minuto)</H3>
-            <Cmd label="Paso 3: instalar y proteger">{`./install-box.sh ${target} --apk nex-tv.apk`}</Cmd>
+            <H3>Paso 3 · Cerrar la puerta trasera de fábrica (unos 2 minutos)</H3>
+            <Cmd label="Paso 3: blindar">{`./blindar-box.sh ${target}`}</Cmd>
+            <p>Estos box traen de fábrica un programa que da control total del equipo a cualquiera en la red (puerto 40000), y un "root" que cualquier app puede pedir. Es por donde se infectan. Este paso los cierra sin reflashear:</p>
+            <Steps>
+              <Step>Busca qué programa escucha en el puerto 40000. Solo lo desactiva si es un servicio propio del fabricante; guarda el original para poder deshacerlo.</Step>
+              <Step>Si el box permite el root del técnico por ADB, le saca el root a las apps. Vos podés seguir entrando para reinstalar.</Step>
+              <Step>Reinicia y verifica: puerto 40000 cerrado, el servicio de fábrica apagado y NEX como inicio.</Step>
+            </Steps>
+            <Callout tone="warning" icon={TriangleAlert} title="Si se detiene sin cambiar nada">
+              Si dice que lo que escucha en el 40000 es "un programa compartido del sistema" o que "ningún servicio de init lo arranca", ese box necesita la reparación completa del firmware: no lo entregues y consultá a NEX. Para deshacer el blindaje: <Code>./restaurar-blindaje.sh {target}</Code>.
+            </Callout>
+            <p>Salió bien si termina con <Code>✓ puerto 40000 cerrado</Code> y <Code>Listo. Seguir con install-box.sh…</Code>. Va después del logo: después del blindaje, grabar-logo ya no tiene root.</p>
+
+            <H3>Paso 4 · Instalar, proteger y apagar el ADB (1 minuto)</H3>
+            <Cmd label="Paso 4: instalar y proteger">{`./install-box.sh ${target} --apk nex-tv.apk`}</Cmd>
             <p>Es el paso que deja el box listo para el cliente. En orden, hace esto:</p>
             <Steps>
               <Step>Instala (o actualiza) NEX TV. Si falla con "¿APK firmado con otra clave?", el box tenía una versión de prueba o el APK no es el oficial.</Step>
@@ -739,10 +753,10 @@ export default function GuidePage({ company }: { company: Company }) {
               Todas las líneas de "Verificación" con ✓, el aviso "ADB: apagando: la conexión se corta acá" y al final "Listo. Falta vincular el equipo…". La TV muestra el código de vinculación.
             </Callout>
             <Callout tone="warning" icon={TriangleAlert} title="Si alguna verificación da ✗">
-              El script avisa "queda ABIERTO: hay verificaciones que fallaron" y no apaga el ADB, justamente para que puedas corregir. Leé qué línea falló y volvé a correr el paso 3. Si la misma línea falla dos veces, mandale la salida completa a NEX.
+              El script avisa "queda ABIERTO: hay verificaciones que fallaron" y no apaga el ADB, justamente para que puedas corregir. Leé qué línea falló y volvé a correr el paso 4. Si la misma línea falla dos veces, mandale la salida completa a NEX.
             </Callout>
             <p className="text-sm leading-6 text-fg-3">
-              En el taller, si todavía vas a seguir trabajando con ese box, agregá <Code>--keep-adb</Code> para que no apague el ADB. Nunca entregues un equipo con el ADB abierto: volvé a correr el paso 3 sin esa opción.
+              En el taller, si todavía vas a seguir trabajando con ese box, agregá <Code>--keep-adb</Code> para que no apague el ADB. Nunca entregues un equipo con el ADB abierto: volvé a correr el paso 4 sin esa opción.
             </p>
           </Section>
 
@@ -814,7 +828,7 @@ export default function GuidePage({ company }: { company: Company }) {
                 <p>A los segundos el box vuelve a responder por ADB en el mismo puerto de antes (3222 en el TX6698).</p>
               </Step>
               <Step title="Al terminar, cerrá el ADB de nuevo.">
-                <p>Corré otra vez el paso 3 de la instalación (<Code>install-box.sh</Code>): verifica todo y lo apaga. Es seguro repetirlo.</p>
+                <p>Corré otra vez el paso 4 de la instalación (<Code>install-box.sh</Code>): verifica todo y lo apaga. Es seguro repetirlo.</p>
               </Step>
             </Steps>
             <Shots>
@@ -1053,7 +1067,7 @@ export default function GuidePage({ company }: { company: Company }) {
               Es un problema del proveedor de los box. Guardá el modelo y el número de compilación y pasáselos a NEX antes de seguir instalando ese lote.
             </Callout>
             <p className="text-sm leading-6 text-fg-3">
-              El paso 3 de la instalación ya desactiva las apps de publicidad y control remoto conocidas y apaga el ADB. Estas alertas cubren lo que queda por debajo y un script no puede quitar.
+              Los pasos 3 y 4 de la instalación cierran el puerto 40000, le sacan el root a las apps, desactivan las apps de publicidad y control remoto conocidas y apagan el ADB. Estas alertas avisan si algo de eso vuelve o si el equipo se instaló sin blindar.
             </p>
           </Section>
 
