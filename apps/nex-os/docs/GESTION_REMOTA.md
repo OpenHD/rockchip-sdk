@@ -865,6 +865,21 @@ secreto `MDM_PANEL_URL`; agregar la URL del panel en Auth → URL Configuration 
 
 Despliegue: `schema-mdm-v15.sql` después de v14, y antes de publicar el panel.
 
+## v17: sync liviano
+
+- Cada equipo sincroniza cada 60 s. Hasta v16 la respuesta traía siempre la configuración completa: casi todo el
+  tráfico de salida de Supabase.
+- Desde v17 la respuesta completa trae `config_hash` (md5 de la configuración, sin `server_time`/`server_epoch`).
+  NEX TV 3.0 lo devuelve en `p_status.config_hash`; si nada cambió, recibe solo
+  `{status: "paired", unchanged: true, config_hash, server_time, server_epoch}` y usa la configuración guardada.
+- El latido, los eventos y la salud se procesan igual. El hash no se guarda en `mdm_devices.health`.
+- El cuerpo de v15 pasó a `_mdm_device_sync_full` (sin permiso para anon); `mdm_device_sync` es un envoltorio con la
+  misma firma. **Los cambios futuros del sync van en `_mdm_device_sync_full`.** Si alguien vuelve a correr v15, el
+  envoltorio se pisa y los equipos reciben todo otra vez: no se rompe nada, se pierde el ahorro hasta correr v17.
+- Compatible para atrás: equipos viejos y agentes Linux no mandan hash y reciben todo, más un campo que ignoran.
+
+Despliegue: `schema-mdm-v17.sql` en cualquier momento después de v15 (no depende del panel).
+
 ## Root (su) en los TX6698
 
 Los TX6698 traen `su` (firmware userdebug) y el kit de instalación lo usa para copiar NEX al sistema. Desde NEX TV 2.1.1,

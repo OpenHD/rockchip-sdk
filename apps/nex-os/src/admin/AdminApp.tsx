@@ -23,7 +23,9 @@ import {
   Package,
   Palette,
   Plug,
+  Plus,
   ScrollText,
+  Search,
   ShieldCheck,
   Skull,
   Tv,
@@ -35,7 +37,11 @@ import { IdleGuard, StepUpProvider } from './security';
 import { isAdminSupabaseConfigured } from './supabaseAdmin';
 import { SIGNUP_ENABLED, TURNSTILE_SITE_KEY } from './config';
 import Turnstile from './Turnstile';
-import { db, run, type Company } from './api';
+import { db, rpcUnlockCode, run, type Company, type Device, type UnlockCode } from './api';
+import CommandPalette, { type PaletteEntryView } from './CommandPalette';
+import { pushRecent, type PaletteResult } from './search';
+import { useToast } from './toast';
+import { useQuickActions } from './useQuickActions';
 import { FILTERS } from './deviceMeta';
 import { NO_ZONE } from './zones';
 import { AcceptLink, ForgotPassword, SetPassword } from './AuthFlows';
@@ -49,7 +55,7 @@ import ThemeToggle from './ThemeToggle';
 import AlertsPage from './pages/Alerts';
 import AppsPage from './pages/Apps';
 import BrandPage from './pages/Brand';
-import DevicesPage from './pages/Devices';
+import DevicesPage, { ClaimModal, LockModal, PaymentModal, RestrictModal, UnlockCodeModal } from './pages/Devices';
 import { CatalogPage, FirmwarePage, NewCompanyPage, PiracyPage } from './pages/Nex';
 import NoticesPage from './pages/Notices';
 import OverviewPage from './pages/Overview';
@@ -398,6 +404,8 @@ const NEX_NAV: NavItem<NexSection>[] = [
   { id: 'pirateria', label: 'Anti-piratería', icon: Skull },
 ];
 
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
 /** Lo que más se usa en la calle: queda a un toque en la barra inferior del celular. */
 const MOBILE_TABS: CompanySection[] = ['resumen', 'equipos', 'comunicados'];
 const ALL_COMPANY_ITEMS = COMPANY_NAV.flatMap((g) => g.items);
@@ -533,18 +541,73 @@ function CompanySwitcher({ companies, current, onPick }: { companies: Company[];
   );
 }
 
+/** Otras palabras con las que alguien buscaría cada sección en el buscador global. */
+const SECTION_KEYWORDS: Record<CompanySection, string> = {
+  resumen: 'inicio hoy tablero pendientes',
+  equipos: 'tv box clientes abonados listado',
+  zonas: 'localidad barrio nodo olt caidas cortes',
+  comunicados: 'mensaje aviso pantalla corte clima',
+  apps: 'aplicaciones netflix youtube play store apk',
+  marca: 'logo cobro pago mensaje telefono gracia vencimiento',
+  avisos: 'alertas telegram email notificaciones',
+  miembros: 'usuarios personas invitar compañero acceso',
+  api: 'clave integracion facturacion sistema',
+  auditoria: 'historial registro quien hizo',
+  guia: 'ayuda manual instalar instalacion problemas preguntas',
+};
+const PALETTE_SECTIONS: PaletteEntryView[] = COMPANY_NAV.flatMap((g) => g.items).map((n) => ({ id: n.id, label: n.label, icon: n.icon, keywords: SECTION_KEYWORDS[n.id] }));
+const PALETTE_ACTIONS: PaletteEntryView[] = [
+  { id: 'claim', label: 'Vincular equipo', icon: Plus, keywords: 'nuevo agregar alta sumar codigo qr instalar box tv' },
+  { id: 'notice', label: 'Nuevo comunicado', icon: Megaphone, keywords: 'enviar mandar mensaje aviso corte clima' },
+];
+const PALETTE_FILTERS: PaletteEntryView[] = FILTERS.filter((f) => f.id !== 'todos').map((f) => ({ id: f.id, label: `Equipos: ${f.label.toLowerCase()}`, icon: Tv, keywords: f.id === 'vencidos' ? 'deuda deben morosos' : f.id === 'offline' ? 'caidos apagados desconectados' : undefined }));
+
+const recentsKey = (companyId: string) => `nex-admin-recent:${companyId}`;
+
+/** Diálogos que se abren desde el buscador global o el Resumen, sin pasar por el listado de equipos. */
+type QuickDialog =
+  | { kind: 'claim' }
+  | { kind: 'payment' | 'lock' | 'restrict'; device: Device }
+  | { kind: 'unlock-code'; device: Device; result: UnlockCode };
+
 function CompanyWorkspace({
   company,
   route,
   navigate,
   onCompanyChanged,
+  palette,
+  onPaletteClose,
 }: {
   company: Company;
   route: Extract<Route, { scope: 'company' }>;
   navigate: (r: Route, replace?: boolean) => void;
   onCompanyChanged: () => void;
+  /** El buscador global está abierto (lo abre el armazón: Ctrl/⌘ K, "/" o el botón Buscar). */
+  palette: boolean;
+  onPaletteClose: () => void;
 }) {
   const data = useCompanyData(company.id);
+  const toast = useToast();
+  const quick = useQuickActions(data.reload);
+  const [dialog, setDialog] = useState<QuickDialog | null>(null);
+  const [recents, setRecents] = useState<string[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(recentsKey(company.id)) ?? '[]');
+      return Array.isArray(saved) ? saved.filter((x): x is string => typeof x === 'string').slice(0, 5) : [];
+    } catch {
+      return [];
+    }
+  });
+  const remember = (id: string) =>
+    setRecents((prev) => {
+      const next = pushRecent(prev, id);
+      try {
+        localStorage.setItem(recentsKey(company.id), JSON.stringify(next));
+      } catch {
+        /* sin almacenamiento: no se recuerdan */
+      }
+      return next;
+    });
   const go = (section: CompanySection, extra: { filter?: string; device?: string; zone?: string } = {}) =>
     navigate({ scope: 'company', companyId: company.id, section, ...extra });
   /** Equipos con un filtro de estado y, si se pasa, una zona (id o "sin-zona"). Lo que no existe se ignora. */
@@ -554,6 +617,66 @@ function CompanyWorkspace({
       zone: zone && (zone === NO_ZONE || data.zones.some((z) => z.zone_id === zone)) ? zone : undefined,
     });
 
+  const openDevice = (id: string) => {
+    remember(id);
+    go('equipos', { device: id });
+  };
+
+  const runPalette = (r: PaletteResult) => {
+    onPaletteClose();
+    if (r.kind === 'device') return openDevice(r.device.id);
+    if (r.kind === 'entry') {
+      if (r.group === 'section') return go(r.entry.id as CompanySection);
+      if (r.group === 'filter') return goDevices(r.entry.id);
+      if (r.entry.id === 'claim') return setDialog({ kind: 'claim' });
+      return go('comunicados');
+    }
+    const device = data.devices?.find((d) => d.id === r.device.id);
+    if (!device) return;
+    remember(device.id);
+    switch (r.action) {
+      case 'pay':
+        return setDialog({ kind: 'payment', device });
+      case 'lock':
+        return setDialog({ kind: 'lock', device });
+      case 'restrict':
+        return setDialog({ kind: 'restrict', device });
+      case 'unlock':
+        return void quick.unlock(device);
+      case 'unrestrict':
+        return void quick.unrestrict(device);
+      default:
+        rpcUnlockCode(device.id).then(
+          (result) => setDialog({ kind: 'unlock-code', device, result }),
+          (err: Error) => toast.show(err.message, 'error'),
+        );
+    }
+  };
+
+  return (
+    <>
+      {page()}
+      {palette && (
+        <CommandPalette
+          company={company}
+          devices={data.devices}
+          actions={PALETTE_ACTIONS}
+          sections={PALETTE_SECTIONS}
+          filters={PALETTE_FILTERS}
+          recents={recents}
+          onRun={runPalette}
+          onClose={onPaletteClose}
+        />
+      )}
+      {dialog?.kind === 'claim' && <ClaimModal company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
+      {dialog?.kind === 'payment' && <PaymentModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
+      {dialog?.kind === 'lock' && <LockModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
+      {dialog?.kind === 'restrict' && <RestrictModal device={dialog.device} company={company} onClose={() => setDialog(null)} onDone={data.reload} />}
+      {dialog?.kind === 'unlock-code' && <UnlockCodeModal device={dialog.device} result={dialog.result} onClose={() => setDialog(null)} />}
+    </>
+  );
+
+  function page() {
   switch (route.section) {
     case 'equipos':
       return (
@@ -566,7 +689,10 @@ function CompanyWorkspace({
           goZones={() => go('zonas')}
           initialClaim={initialClaim}
           selectedId={route.device ?? null}
-          onSelect={(id) => navigate({ ...route, device: id ?? undefined }, true)}
+          onSelect={(id) => {
+            if (id) remember(id);
+            navigate({ ...route, device: id ?? undefined }, true);
+          }}
         />
       );
     case 'zonas':
@@ -594,9 +720,13 @@ function CompanyWorkspace({
           data={data}
           goDevices={goDevices}
           goZones={() => go('zonas')}
-          openDevice={(id) => go('equipos', { device: id })}
+          openDevice={openDevice}
+          onPay={(d) => void quick.payOneMonth(d)}
+          onClaim={() => setDialog({ kind: 'claim' })}
+          goSection={(section) => go(section)}
         />
       );
+  }
   }
 }
 
@@ -628,7 +758,28 @@ export function Shell({ session }: { session: Session }) {
   const [tick, setTick] = useState(0);
   const [mobileNav, setMobileNav] = useState(false);
   const [changePassword, setChangePassword] = useState(false);
+  const [palette, setPalette] = useState(false);
+  /** El buscador trabaja sobre los equipos de una empresa: fuera de una (Administración NEX) no se abre. */
+  const hasCompany = useRef(false);
   const [route, navigate] = useRoute();
+
+  // Buscador global: Ctrl/⌘ K desde cualquier lado, o "/" cuando no se está escribiendo. No se abre encima de otro diálogo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const combo = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k';
+      const target = e.target as HTMLElement | null;
+      const typing = !!target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+      const slash = e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !typing;
+      if (!combo && !slash) return;
+      const open = document.querySelector('[data-palette]');
+      if (!open && document.querySelector('[aria-modal="true"]')) return;
+      if ((open && slash) || (!open && !hasCompany.current)) return;
+      e.preventDefault();
+      setPalette(!open);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -659,11 +810,18 @@ export function Shell({ session }: { session: Session }) {
 
   const current = effective.scope === 'company' ? companies?.find((c) => c.id === effective.companyId) : undefined;
   const switcherCompany = current ?? companies?.[0];
+  useEffect(() => {
+    hasCompany.current = !!current;
+  }, [current]);
   const nav = (r: Route) => {
     setMobileNav(false);
     navigate(r);
   };
   const link = useRouteLink(nav);
+  const openPalette = () => {
+    setMobileNav(false);
+    setPalette(true);
+  };
   const email = session.user.email ?? '';
   const sectionLabel =
     effective.scope === 'company'
@@ -687,6 +845,18 @@ export function Shell({ session }: { session: Session }) {
           />
         ) : (
           !companies && !error && <Skeleton className="h-[54px]" />
+        )}
+        {current && (
+          <button
+            type="button"
+            onClick={openPalette}
+            aria-keyshortcuts="Control+K Meta+K"
+            className="mt-2 flex h-9 w-full items-center gap-2 rounded-lg border border-line bg-field px-2.5 text-left text-sm text-fg-3 transition hover:border-line-strong hover:text-fg"
+          >
+            <Search className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">Buscar equipo o acción</span>
+            <kbd className="nx-kbd hidden lg:inline-flex" aria-hidden>{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
         )}
       </div>
       <nav aria-label="Secciones" className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pb-4 pt-1">
@@ -763,6 +933,7 @@ export function Shell({ session }: { session: Session }) {
           ) : (
             <span className="truncate text-[15px] font-semibold text-fg">{sectionLabel ?? 'NEX MDM'}</span>
           )}
+          {current && <IconButton icon={Search} label="Buscar equipo o acción" className="ml-auto h-11 w-11" onClick={openPalette} />}
         </header>
 
         <main id="contenido" tabIndex={-1} className={`mx-auto w-full max-w-[1360px] flex-1 px-4 py-5 outline-none sm:px-6 lg:px-8 lg:py-8 ${current ? 'pb-24 lg:pb-10' : 'pb-10'}`}>
@@ -780,7 +951,7 @@ export function Shell({ session }: { session: Session }) {
               </div>
             )
           ) : effective.scope === 'company' && current ? (
-            <CompanyWorkspace key={current.id} company={current} route={effective} navigate={navigate} onCompanyChanged={() => setTick((t) => t + 1)} />
+            <CompanyWorkspace key={current.id} company={current} route={effective} navigate={navigate} onCompanyChanged={() => setTick((t) => t + 1)} palette={palette} onPaletteClose={() => setPalette(false)} />
           ) : effective.scope === 'nex' && effective.section === 'nueva-empresa' ? (
             <NewCompanyPage onCreated={(id) => { setTick((t) => t + 1); navigate({ scope: 'company', companyId: id, section: 'resumen' }); }} />
           ) : effective.scope === 'nex' && effective.section === 'catalogo' ? (

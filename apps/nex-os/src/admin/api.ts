@@ -173,6 +173,15 @@ export async function rpcSetDevicesZone(company: string, devices: string[], zone
   return changed;
 }
 
+// RPC de equipos (v8/v9) en un solo lugar: las usan el listado, el buscador global, el Resumen y las acciones en lote.
+export const rpcSetLock = (device: string, locked: boolean, reason?: string | null) =>
+  run(db().rpc('mdm_set_device_lock', locked ? { p_device: device, p_locked: true, p_reason: reason ?? null } : { p_device: device, p_locked: false }));
+export const rpcSetRestricted = (device: string, restricted: boolean, reason: string | null = null) =>
+  run(db().rpc('mdm_set_device_restricted', { p_device: device, p_restricted: restricted, p_reason: reason }));
+export const rpcSetPaidUntil = (device: string, paidUntil: string | null, note: string | null = null) =>
+  run(db().rpc('mdm_set_paid_until', { p_device: device, p_paid_until: paidUntil, p_note: note }));
+export const rpcUnlockCode = (device: string) => run<UnlockCode>(db().rpc('mdm_unlock_code', { p_device: device }));
+
 /** Mismo formato que valida la base (mdm_devices.external_ref). */
 export const EXTERNAL_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}$/;
 /** Mismos formatos que valida mdm_update_company (v9). */
