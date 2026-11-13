@@ -5,7 +5,7 @@
 
 /** Versión de NEX TV que describe la guía y nombre del kit publicado en /downloads/. */
 export const GUIDE_VERSION = '2.1.1';
-export const KIT_PATH = `/downloads/kit-instalacion-${GUIDE_VERSION}.zip`;
+export const KIT_PATH = `https://nextv-descargas.macch.ai/kit-instalacion-${GUIDE_VERSION}.zip`;
 
 /** Minúsculas y sin tildes, para que "vinculacion" encuentre "vinculación". */
 export function fold(text: string): string {
