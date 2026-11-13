@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 
-/** APK de NEX TV para instalar en los TV box. Se publica junto al panel en public/downloads/. */
-export const APK_PATH = '/downloads/nex-tv.apk';
+/** APK de NEX TV para instalar en los TV box. Se publica en R2 (bucket nex-tv-descargas), servido por nextv-descargas.macch.ai. */
+export const APK_PATH = 'https://nextv-descargas.macch.ai/nex-tv.apk';
 
 /** Botón de descarga del APK. Solo aparece si el archivo está publicado, así el panel puede salir antes que el APK. */
 export default function DownloadApk() {
