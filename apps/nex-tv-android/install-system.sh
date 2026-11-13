@@ -39,7 +39,17 @@ adb connect "$TARGET" >/dev/null 2>&1
 online || { echo "No responde por ADB: $TARGET" >&2; exit 1; }
 echo "    $(dev getprop ro.product.model) · $(dev getprop ro.build.type) · API $(dev getprop ro.build.version.sdk)"
 [ "$(dev getprop ro.debuggable)" = 1 ] || { echo "Firmware cerrado (ro.debuggable=0): no se puede escribir el sistema" >&2; exit 1; }
-dev su 0 id | grep -q 'uid=0' || { echo "su no da root en este equipo" >&2; exit 1; }
+# Root: su o, en un equipo ya blindado (blindar-box.sh le saca el setuid a su), adb root.
+if dev su 0 id | grep -q 'uid=0'; then
+	runroot() { dev su 0 sh "$@"; }
+elif ! grep -qi production <<<"$(adb -s "$TARGET" root 2>&1)" && sleep 3 && adb connect "$TARGET" >/dev/null 2>&1 &&
+	sleep 2 && dev id | grep -q 'uid=0'; then
+	runroot() { dev sh "$@"; }
+	echo "    root con adb root (su ya no da root: equipo blindado)"
+else
+	echo "Sin root en este equipo (ni su ni adb root)" >&2
+	exit 1
+fi
 
 # Lo corre root en el equipo; ante el primer error se detiene y el equipo no se reinicia.
 ROOT_SH=$(mktemp)
@@ -80,7 +90,7 @@ if [ "$DRY" = 1 ]; then
 fi
 adb -s "$TARGET" push "$APK" "$TMP_APK" >/dev/null && adb -s "$TARGET" push "$ROOT_SH" "$TMP_SH" >/dev/null ||
 	{ echo "No se pudo copiar al equipo" >&2; exit 1; }
-out=$(dev su 0 sh "$TMP_SH" 2>&1)
+out=$(runroot "$TMP_SH" 2>&1)
 dev rm -f "$TMP_APK" "$TMP_SH"
 if [ "$(tail -1 <<<"$out")" != ok ]; then
 	echo "$out" | sed 's/^/    /'
