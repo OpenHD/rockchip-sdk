@@ -225,9 +225,13 @@ object Agent {
         }
         val hw = hardwareId()
         val events = readEvents()
+        // Sync liviano (v17): con el hash de la última configuración, el servidor responde solo
+        // {unchanged: true} si no cambió nada. Servidores viejos ignoran el campo y mandan todo.
+        val known = config()?.str("config_hash").orEmpty()
+        val status0 = statusJson().apply { if (CONFIG_HASH.matches(known)) put("config_hash", known) }
         var resp = rpc("mdm_device_sync", JSONObject()
             .put("p_firmware", firmware())
-            .put("p_status", statusJson())
+            .put("p_status", status0)
             .put("p_events", JSONArray(events))
             .put("p_hardware_id", hw ?: JSONObject.NULL)) ?: return false
         var status = resp.optString("status")
@@ -252,14 +256,24 @@ object Agent {
             }
         }
 
-        when (status) {
-            "unpaired" -> {
+        val ep = resp.opt("server_epoch")
+        when {
+            status == "paired" && resp.optBoolean("unchanged") -> {
+                // La configuración guardada sigue vigente: no se reescribe ni se vuelve a validar.
+                val saved = config()
+                if (saved == null || resp.str("config_hash") != known) {
+                    Log.w(TAG, "respuesta liviana sin configuración local")
+                    return false
+                }
+                resp = saved
+            }
+            status == "unpaired" -> {
                 pairingFile.writeAtomic(JSONObject()
                     .put("pairing_code", resp.opt("pairing_code"))
                     .put("pairing_expires_at", resp.opt("pairing_expires_at")).toString())
                 configFile.delete()
             }
-            "paired" -> {
+            status == "paired" -> {
                 if (resp.optJSONObject("company")?.has("id") != true || resp.optJSONArray("apps") == null) {
                     Log.w(TAG, "respuesta de sync inválida")
                     return false
@@ -275,7 +289,6 @@ object Agent {
 
         Updater.offer(app, resp.optJSONObject("update"))
         lastSyncFile.writeAtomic(now().toString())
-        val ep = resp.opt("server_epoch")
         if (ep is Number && ep.toLong() > 0) serverEpochFile.writeAtomic(ep.toLong().toString())
         return true
     }
@@ -681,6 +694,7 @@ object Agent {
     }
 
     private val TOKEN = Regex("[0-9a-f]{64}")
+    private val CONFIG_HASH = Regex("[0-9a-f]{32}")
     private val DOMAIN = Regex("[a-z0-9.-]{1,253}")
     private val LOGO_PATH = Regex("[0-9a-f-]{36}/[A-Za-z0-9._-]{1,80}")
     private val LOGO_NAME = Regex("logo\\.(png|jpg|webp)")

@@ -24,6 +24,8 @@ object Updater {
     private var busy = false
     private var failed = ""
     private var warned = false
+    private const val MAX_REDIRECTS = 3
+    private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
 
     private fun dir(ctx: Context) = File(ctx.filesDir, "agent").apply { mkdirs() }
 
@@ -109,16 +111,37 @@ object Updater {
             }.getOrDefault(false)
         }
 
-    private fun download(url: String, test: Boolean, size: Long, sha: String, part: File) {
-        val connection = URL(url).openConnection()
-        // HTTP solo para el hook demo; no se siguen redirecciones que puedan degradar HTTPS.
-        val conn = if (connection is HttpsURLConnection) connection else {
-            check(BuildConfig.DEMO && test && allowedUrl(url, true)) { "se requiere HTTPS" }
-            connection as HttpURLConnection
+    /**
+     * Abre la descarga siguiendo hasta [MAX_REDIRECTS] redirecciones (GitHub Releases, R2, CDN).
+     * Cada salto se valida a mano: solo https, sin usuario en la URL. La integridad no depende del
+     * servidor: el sha256 firmado se verifica sobre los bytes descargados.
+     */
+    private fun open(url: String, test: Boolean): HttpURLConnection {
+        var current = url
+        repeat(MAX_REDIRECTS + 1) {
+            val connection = URL(current).openConnection()
+            // HTTP solo para el hook demo, y sin redirecciones.
+            val conn = if (connection is HttpsURLConnection) connection else {
+                check(BuildConfig.DEMO && test && current == url && allowedUrl(url, true)) { "se requiere HTTPS" }
+                connection as HttpURLConnection
+            }
+            conn.connectTimeout = 30_000
+            conn.readTimeout = 30_000
+            conn.instanceFollowRedirects = false
+            val code = conn.responseCode
+            if (code !in REDIRECT_CODES || conn !is HttpsURLConnection) return conn
+            val location = conn.getHeaderField("Location")
+            conn.disconnect()
+            check(!location.isNullOrBlank()) { "redirección sin destino" }
+            val next = runCatching { URL(URL(current), location).toString() }.getOrNull()
+            check(next != null && allowedUrl(next, false)) { "redirección no permitida" }
+            current = next
         }
-        conn.connectTimeout = 30_000
-        conn.readTimeout = 30_000
-        conn.instanceFollowRedirects = false
+        error("demasiadas redirecciones")
+    }
+
+    private fun download(url: String, test: Boolean, size: Long, sha: String, part: File) {
+        val conn = open(url, test)
         try {
             check(conn.responseCode == 200) { "HTTP ${conn.responseCode}" }
             val digest = MessageDigest.getInstance("SHA-256")
