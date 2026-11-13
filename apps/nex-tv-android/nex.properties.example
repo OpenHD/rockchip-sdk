@@ -1,0 +1,5 @@
+# Copiar a nex.properties (no se versiona) o pasar con -P al compilar.
+nex.mdmUrl=https://<proyecto>.supabase.co
+nex.mdmAnonKey=<clave anon pública>
+# Opcional: dominios siempre permitidos además de Supabase, separados por espacio.
+nex.baseDomains=
