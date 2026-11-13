@@ -539,6 +539,7 @@ export default function NoticesPage({ company, deviceCount, devices = null, zone
     <>
       <PageHeader
         title="Comunicados"
+        help={{ section: 'comunicados', label: 'comunicados' }}
         subtitle={`Mensajes que aparecen en la pantalla de los TV de ${company.name}, en todos o solo en algunas zonas: cortes, alertas del clima, campañas de salud y avisos municipales.`}
       />
 

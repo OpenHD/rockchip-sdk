@@ -3,7 +3,6 @@ import {
   Activity,
   Ban,
   CalendarPlus,
-  ChevronRight,
   CircleCheck,
   Copy,
   CreditCard,
@@ -32,6 +31,10 @@ import {
   EXTERNAL_REF_RE,
   isOnline,
   restrictDay,
+  rpcSetLock,
+  rpcSetPaidUntil,
+  rpcSetRestricted,
+  rpcUnlockCode,
   run,
   serviceState,
   STATE_LOG_COLUMNS,
@@ -43,6 +46,8 @@ import {
   type UnlockCode,
   type ZoneStatus,
 } from '../api';
+import BulkDialog from '../BulkDialog';
+import { nextPaidUntil, type BulkKind } from '../bulk';
 import { HealthPill, HealthSection, NetDiagSection } from '../DeviceHealth';
 import { DEVICE_SORTS, matchesQuery, paginate, sortDevices, type DeviceSort } from '../deviceList';
 import { FILTERS, healthIssues, paymentText, SERVICE_STAGES, STATE_SOURCE_LABELS, STATUS_META, type Filter } from '../deviceMeta';
@@ -50,6 +55,7 @@ import { addMonths, copyText, formatDate, LOCK_REASONS, relativeTime, RESTRICT_R
 import type { HealthInputs, HealthScore } from '../health';
 import { useStepUp } from '../stepUp';
 import { useToast } from '../toast';
+import { useQuickActions } from '../useQuickActions';
 import {
   Badge,
   Button,
@@ -61,10 +67,12 @@ import {
   ErrorState,
   ErrorText,
   Field,
+  HelpLink,
   IconButton,
   inputClass,
   Menu,
   Modal,
+  type MenuItem,
   PageHeader,
   Pagination,
   SearchInput,
@@ -91,15 +99,33 @@ type Dialog =
   | { kind: 'external-ref'; device: Device }
   | { kind: 'unlock-code'; device: Device; result: UnlockCode }
   | { kind: 'claim'; code?: string }
-  | { kind: 'zone'; devices: Device[] };
+  | { kind: 'zone'; devices: Device[] }
+  | { kind: 'bulk'; action: BulkKind; devices: Device[] };
 
 // RPC de v8 en un solo lugar (contrato NEX MDM v8).
-const rpcUnlockCode = (device: string) => run<UnlockCode>(db().rpc('mdm_unlock_code', { p_device: device }));
 const rpcSetExternalRef = (device: string, ref: string | null) =>
   run(db().rpc('mdm_set_external_ref', { p_device: device, p_ref: ref }));
-// RPC de v9.
-const rpcSetRestricted = (device: string, restricted: boolean, reason: string | null = null) =>
-  run(db().rpc('mdm_set_device_restricted', { p_device: device, p_restricted: restricted, p_reason: reason }));
+
+/** Último motivo elegido al bloquear o restringir: la próxima vez arranca en ese (casi siempre es el mismo). */
+function useRememberedReason(key: string, options: readonly string[]): [string, (r: string) => void] {
+  const [reason, setReason] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved && options.includes(saved) ? saved : options[0];
+    } catch {
+      return options[0];
+    }
+  });
+  const pick = (r: string) => {
+    setReason(r);
+    try {
+      if (options.includes(r)) localStorage.setItem(key, r);
+    } catch {
+      /* sin almacenamiento: no se recuerda */
+    }
+  };
+  return [reason, pick];
+}
 
 function useAction(onDone: () => void) {
   const toast = useToast();
@@ -123,14 +149,14 @@ function useAction(onDone: () => void) {
   return { busy, error, exec };
 }
 
-function LockModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
-  const [reason, setReason] = useState(LOCK_REASONS[0]);
+export function LockModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useRememberedReason('nex-admin-lock-reason', LOCK_REASONS);
   const [custom, setCustom] = useState('');
   const { busy, error, exec } = useAction(onDone);
   const finalReason = reason === 'Otro' ? custom.trim() : reason;
   const submit = () =>
     exec(
-      () => run(db().rpc('mdm_set_device_lock', { p_device: device.id, p_locked: true, p_reason: finalReason })),
+      () => rpcSetLock(device.id, true, finalReason),
       `Bloqueo enviado a "${device.name ?? 'equipo'}". Esperando confirmación del TV…`,
     ).then((ok) => ok && onClose());
 
@@ -173,8 +199,8 @@ function LockModal({ device, company, onClose, onDone }: { device: Device; compa
   );
 }
 
-function RestrictModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
-  const [reason, setReason] = useState(RESTRICT_REASONS[0]);
+export function RestrictModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useRememberedReason('nex-admin-restrict-reason', RESTRICT_REASONS);
   const [custom, setCustom] = useState('');
   const { busy, error, exec } = useAction(onDone);
   const finalReason = reason === 'Otro' ? custom.trim() : reason;
@@ -233,7 +259,7 @@ function RestrictModal({ device, company, onClose, onDone }: { device: Device; c
   );
 }
 
-function PaymentModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
+export function PaymentModal({ device, company, onClose, onDone }: { device: Device; company: Company; onClose: () => void; onDone: () => void }) {
   const base = device.paid_until && device.paid_until >= todayIso() ? device.paid_until : todayIso();
   const [date, setDate] = useState(addMonths(base, 1));
   const [note, setNote] = useState('');
@@ -242,7 +268,7 @@ function PaymentModal({ device, company, onClose, onDone }: { device: Device; co
 
   const save = (value: string | null) =>
     exec(
-      () => run(db().rpc('mdm_set_paid_until', { p_device: device.id, p_paid_until: value, p_note: note || null })),
+      () => rpcSetPaidUntil(device.id, value, note || null),
       value ? `Pago registrado: pagado hasta ${formatDate(value)}` : 'Control de pago desactivado',
     ).then((ok) => ok && onClose());
 
@@ -257,7 +283,7 @@ function PaymentModal({ device, company, onClose, onDone }: { device: Device; co
             <Button variant="ghost" className="mr-auto" disabled={busy} onClick={() => save(null)}>Quitar control de pago</Button>
           )}
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button icon={CreditCard} disabled={busy || !date} onClick={() => save(date)}>Guardar</Button>
+          <Button autoFocus icon={CreditCard} disabled={busy || !date} onClick={() => save(date)}>Guardar</Button>
         </>
       }
     >
@@ -399,7 +425,7 @@ function ExternalRefModal({ device, onClose, onDone }: { device: Device; onClose
   );
 }
 
-function UnlockCodeModal({ device, result, onClose }: { device: Device; result: UnlockCode; onClose: () => void }) {
+export function UnlockCodeModal({ device, result, onClose }: { device: Device; result: UnlockCode; onClose: () => void }) {
   const toast = useToast();
   const pretty = `${result.code.slice(0, 4)} ${result.code.slice(4)}`;
   const copy = async () => toast.show((await copyText(result.code)) ? 'Código copiado' : 'No se pudo copiar', 'info');
@@ -646,7 +672,7 @@ function DeviceDrawer({
 
   const unlock = async () => {
     try {
-      await run(db().rpc('mdm_set_device_lock', { p_device: device.id, p_locked: false }));
+      await rpcSetLock(device.id, false);
       toast.show('Desbloqueo enviado. Esperando confirmación del TV…');
       onChanged();
     } catch (err) {
@@ -792,7 +818,7 @@ function DeviceDrawer({
             <NetDiagSection device={device} now={now} onRefresh={onChanged} />
 
             <section>
-              <SectionTitle>Seguridad</SectionTitle>
+              <SectionTitle action={<HelpLink section="seguridad" label="qué hacer con un equipo posiblemente infectado" className="-my-1.5" />}>Seguridad</SectionTitle>
               <div className="divide-y divide-line rounded-xl border border-line px-4">
                 <HealthRow ok={h.hardened} label="Modo TV cerrado" />
                 {h.platform === 'android' ? (
@@ -877,6 +903,8 @@ function DeviceDrawer({
 // Página
 // ---------------------------------------------------------------------------
 
+const SORT_KEY = 'nex-admin-device-sort';
+
 export default function DevicesPage({
   company,
   data,
@@ -903,7 +931,23 @@ export default function DevicesPage({
   const [zoneRaw, setZoneRaw] = useState<string | null>(initialZone ?? null);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<DeviceSort>('nombre');
+  // El orden elegido se recuerda en este navegador: cobranzas suele querer "Pago más próximo", soporte "Problemas primero".
+  const [sort, setSortState] = useState<DeviceSort>(() => {
+    try {
+      const saved = localStorage.getItem(SORT_KEY);
+      return DEVICE_SORTS.some((x) => x.id === saved) ? (saved as DeviceSort) : 'nombre';
+    } catch {
+      return 'nombre';
+    }
+  });
+  const setSort = (v: DeviceSort) => {
+    setSortState(v);
+    try {
+      localStorage.setItem(SORT_KEY, v);
+    } catch {
+      /* sin almacenamiento: no se recuerda */
+    }
+  };
   const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<Dialog | null>(initialClaim ? { kind: 'claim', code: initialClaim } : null);
   const devices = useMemo(() => data.devices ?? [], [data.devices]);
@@ -947,25 +991,30 @@ export default function DevicesPage({
   const allMatchingPicked = matching.length > 0 && matching.every((d) => picked.has(d.id));
   const toggle = (id: string, on: boolean) => setPicked((p) => setSelected(p, [id], on));
 
-  const quickUnlock = async (d: Device) => {
+  const quick = useQuickActions(data.reload);
+  const unlockCode = async (d: Device) => {
     try {
-      await run(db().rpc('mdm_set_device_lock', { p_device: d.id, p_locked: false }));
-      toast.show(`Desbloqueo enviado a "${d.name ?? 'equipo'}"`);
-      data.reload();
+      setDialog({ kind: 'unlock-code', device: d, result: await rpcUnlockCode(d.id) });
     } catch (err) {
       toast.show((err as Error).message, 'error');
     }
   };
-
-  const quickUnrestrict = async (d: Device) => {
-    try {
-      await rpcSetRestricted(d.id, false);
-      toast.show(`Restricción quitada a "${d.name ?? 'equipo'}"`);
-      data.reload();
-    } catch (err) {
-      toast.show((err as Error).message, 'error');
-    }
-  };
+  /** Acciones de un equipo para el menú "⋮". En el celular (`full`) incluye también pago y bloqueo, que en la tabla son botones. */
+  const menuItems = (d: Device, full: boolean): MenuItem[] => [
+    ...(full && d.paid_until ? [{ label: 'Pagó: sumar 1 mes', icon: CalendarPlus, onClick: () => void quick.payOneMonth(d) }] : []),
+    ...(full || d.paid_until ? [{ label: d.paid_until ? 'Registrar pago (otra fecha)' : 'Registrar pago', icon: CreditCard, onClick: () => setDialog({ kind: 'payment', device: d }) }] : []),
+    ...(full ? [d.locked ? { label: 'Desbloquear', icon: LockOpen, onClick: () => void quick.unlock(d) } : { label: 'Bloquear', icon: Lock, onClick: () => setDialog({ kind: 'lock', device: d }) }] : []),
+    ...(full ? [] : [{ label: 'Ver detalle', icon: Activity, onClick: () => onSelect(d.id) }]),
+    d.restricted
+      ? { label: 'Quitar restricción', icon: CircleCheck, onClick: () => void quick.unrestrict(d) }
+      : { label: 'Restringir', icon: Ban, onClick: () => setDialog({ kind: 'restrict', device: d }) },
+    { label: 'Código de desbloqueo', icon: KeyRound, onClick: () => void unlockCode(d) },
+    ...(full ? [] : [
+      { label: 'Renombrar', icon: Pencil, onClick: () => setDialog({ kind: 'rename', device: d }) },
+      { label: 'Cambiar zona', icon: MapPin, onClick: () => setDialog({ kind: 'zone', devices: [d] }) },
+      { label: 'Desvincular', icon: Unlink, danger: true, onClick: () => setDialog({ kind: 'unpair', device: d }) },
+    ]),
+  ];
 
   const th = 'sticky top-0 z-10 border-b border-line bg-surface-2 py-2.5 text-left text-xs font-medium text-fg-3';
 
@@ -973,6 +1022,7 @@ export default function DevicesPage({
     <>
       <PageHeader
         title="Equipos"
+        help={{ section: 'servicio', label: 'bloqueos, pagos y códigos' }}
         subtitle={data.devices ? `${devices.length} ${devices.length === 1 ? 'equipo vinculado' : 'equipos vinculados'} a ${company.name}` : 'Cargando…'}
         actions={<Button icon={Plus} onClick={() => setDialog({ kind: 'claim' })}>Vincular equipo</Button>}
       />
@@ -1111,7 +1161,7 @@ export default function DevicesPage({
                   {zones.length > 0 && <th scope="col" className={`${th} hidden xl:table-cell`}>Zona</th>}
                   <th scope="col" className={th}>Estado</th>
                   <th scope="col" className={th}>Salud</th>
-                  <th scope="col" className={th}>Conexión</th>
+                  <th scope="col" className={`${th} hidden xl:table-cell`}>Conexión</th>
                   <th scope="col" className={th}>Pago</th>
                   <th scope="col" className={`${th} rounded-tr-xl`}><span className="sr-only">Acciones</span></th>
                 </tr>
@@ -1131,9 +1181,14 @@ export default function DevicesPage({
                       <td className={`${td} w-12 pl-3`} onClick={(e) => e.stopPropagation()}>
                         <Checkbox label={`Seleccionar ${d.name ?? d.id.slice(0, 8)}`} checked={isPicked} onChange={(on) => toggle(d.id, on)} />
                       </td>
-                      <td className={`${td} max-w-0 pr-4 lg:w-[28%]`}>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }} className="block max-w-full rounded text-left">
-                          <span className={`block truncate text-sm font-medium ${d.name ? 'text-fg' : 'text-fg-3'}`}>{d.name ?? 'Sin nombre'}</span>
+                      {/* Ancho mínimo real: con max-w-0 la columna quedaba en cero y el estado se montaba encima de la salud. */}
+                      <td className={`${td} w-[32%] pr-4`}>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }} className="block w-full min-w-[10rem] max-w-[20rem] rounded text-left">
+                          <span className={`flex items-center gap-1.5 text-sm font-medium ${d.name ? 'text-fg' : 'text-fg-3'}`}>
+                            {/* Sin la columna Conexión (pantallas medianas), el punto va al lado del nombre. */}
+                            <span className="shrink-0 xl:hidden" title={online ? 'En línea' : `Visto ${relativeTime(d.last_seen_at)}`}><StatusDot online={online} /></span>
+                            <span className="truncate">{d.name ?? 'Sin nombre'}</span>
+                          </span>
                           <span className="block truncate font-mono text-[11px] text-fg-4">
                             {d.id.slice(0, 8)} · {d.firmware_version ?? '—'}{d.external_ref && ` · ${d.external_ref}`}
                           </span>
@@ -1157,19 +1212,19 @@ export default function DevicesPage({
                           )}
                         </td>
                       )}
-                      <td className={`${td} max-w-0 pr-4 lg:w-[22%]`}>
-                        <div className="flex flex-col items-start gap-1">
+                      <td className={`${td} pr-4`}>
+                        <div className="flex flex-col items-start gap-1 whitespace-nowrap">
                           <Badge tone={st.tone} icon={st.icon}>{st.label}</Badge>
                           {applied === 'pendiente' && <span className="flex items-center gap-1 text-xs text-warn"><Hourglass className="h-3 w-3 shrink-0" aria-hidden /> Pendiente de aplicar</span>}
                           {issues.length > 0 && (
-                            <span className="flex max-w-full items-center gap-1 text-xs text-danger" title={issues.join(' · ')}>
+                            <span className="flex max-w-[14rem] items-center gap-1 text-xs text-danger" title={issues.join(' · ')}>
                               <ShieldAlert className="h-3 w-3 shrink-0" aria-hidden /> <span className="truncate">{issues[0]}</span>
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className={`${td} pr-4`}><HealthPill score={data.health.get(d.id)} /></td>
-                      <td className={`${td} pr-4`}>
+                      <td className={`${td} whitespace-nowrap pr-4`}><HealthPill score={data.health.get(d.id)} /></td>
+                      <td className={`${td} hidden pr-4 xl:table-cell`}>
                         <div className="flex items-center gap-2 whitespace-nowrap text-sm text-fg-2">
                           <StatusDot online={online} /> {online ? 'En línea' : <span className="text-fg-3">{relativeTime(d.last_seen_at)}</span>}
                         </div>
@@ -1177,23 +1232,28 @@ export default function DevicesPage({
                       <td className={`${td} whitespace-nowrap pr-4 text-sm ${pay.tone}`}>{pay.text}</td>
                       <td className={`${td} pr-3`} onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-0.5">
+                          {d.paid_until ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="mr-1 px-2"
+                              title={`Registrar pago: un mes más, hasta el ${formatDate(nextPaidUntil(d.paid_until))}. Se puede deshacer.`}
+                              aria-label={`Registrar un mes de pago a ${d.name ?? d.id.slice(0, 8)}, hasta el ${formatDate(nextPaidUntil(d.paid_until))}`}
+                              onClick={() => void quick.payOneMonth(d)}
+                            >
+                              +1 mes
+                            </Button>
+                          ) : (
+                            <IconButton icon={CalendarPlus} label="Registrar pago" onClick={() => setDialog({ kind: 'payment', device: d })} />
+                          )}
                           {d.locked ? (
-                            <IconButton icon={LockOpen} label="Desbloquear" tone="success" onClick={() => quickUnlock(d)} />
+                            <IconButton icon={LockOpen} label="Desbloquear" tone="success" onClick={() => void quick.unlock(d)} />
                           ) : (
                             <IconButton icon={Lock} label="Bloquear" onClick={() => setDialog({ kind: 'lock', device: d })} />
                           )}
-                          <IconButton icon={CalendarPlus} label="Registrar pago" onClick={() => setDialog({ kind: 'payment', device: d })} />
                           <Menu
                             trigger={(toggle, open) => <IconButton icon={EllipsisVertical} label="Más acciones" aria-haspopup="menu" aria-expanded={open} onClick={toggle} />}
-                            items={[
-                              { label: 'Ver detalle', icon: Activity, onClick: () => onSelect(d.id) },
-                              d.restricted
-                                ? { label: 'Quitar restricción', icon: CircleCheck, onClick: () => quickUnrestrict(d) }
-                                : { label: 'Restringir', icon: Ban, onClick: () => setDialog({ kind: 'restrict', device: d }) },
-                              { label: 'Renombrar', icon: Pencil, onClick: () => setDialog({ kind: 'rename', device: d }) },
-                              { label: 'Cambiar zona', icon: MapPin, onClick: () => setDialog({ kind: 'zone', devices: [d] }) },
-                              { label: 'Desvincular', icon: Unlink, danger: true, onClick: () => setDialog({ kind: 'unpair', device: d }) },
-                            ]}
+                            items={menuItems(d, false)}
                           />
                         </div>
                       </td>
@@ -1215,7 +1275,7 @@ export default function DevicesPage({
                 return (
                   <li key={d.id} className={`flex items-center ${isPicked ? 'bg-accent-soft' : ''}`}>
                     <Checkbox label={`Seleccionar ${d.name ?? d.id.slice(0, 8)}`} checked={isPicked} onChange={(on) => toggle(d.id, on)} className="ml-1.5 h-11 w-11" />
-                    <button type="button" onClick={() => onSelect(d.id)} className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-1 pr-4 text-left transition active:bg-fill">
+                    <button type="button" onClick={() => onSelect(d.id)} className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-1 pr-1 text-left transition active:bg-fill">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <StatusDot online={online} />
@@ -1233,8 +1293,13 @@ export default function DevicesPage({
                           {z && <> · <span className={z.outage_started_at ? 'text-danger' : ''}>{z.name}</span></>}
                         </div>
                       </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-fg-4" aria-hidden />
                     </button>
+                    <div className="mr-1.5 shrink-0">
+                      <Menu
+                        trigger={(toggle, open) => <IconButton icon={EllipsisVertical} label={`Acciones para ${d.name ?? d.id.slice(0, 8)}`} aria-haspopup="menu" aria-expanded={open} onClick={toggle} className="h-11 w-11" />}
+                        items={menuItems(d, true)}
+                      />
+                    </div>
                   </li>
                 );
               })}
@@ -1260,9 +1325,21 @@ export default function DevicesPage({
           >
             <div className="pointer-events-auto flex w-full max-w-lg animate-[nexIn_.18s_ease-out] items-center gap-2 rounded-xl border border-line-strong bg-overlay py-2 pl-4 pr-2 shadow-pop">
               <span className="min-w-0 flex-1 truncate text-sm text-fg-2" aria-live="polite">
-                <span className="font-semibold tabular-nums text-fg">{pickedDevices.length}</span> {pickedDevices.length === 1 ? 'seleccionado' : 'seleccionados'}
+                <span className="font-semibold tabular-nums text-fg">{pickedDevices.length}</span> <span className="hidden sm:inline">{pickedDevices.length === 1 ? 'seleccionado' : 'seleccionados'}</span>
+                <span className="sm:hidden">{pickedDevices.length === 1 ? 'elegido' : 'elegidos'}</span>
               </span>
-              <Button size="sm" icon={MapPin} onClick={() => setDialog({ kind: 'zone', devices: pickedDevices })}>Asignar zona</Button>
+              <Button size="sm" onClick={() => setDialog({ kind: 'bulk', action: 'pay', devices: pickedDevices })}>Registrar pago</Button>
+              <Menu
+                placement="top"
+                trigger={(toggle, open) => <Button size="sm" variant="secondary" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>Más</Button>}
+                items={[
+                  { label: 'Bloquear', icon: Lock, danger: true, onClick: () => setDialog({ kind: 'bulk', action: 'lock', devices: pickedDevices }) },
+                  { label: 'Desbloquear', icon: LockOpen, onClick: () => setDialog({ kind: 'bulk', action: 'unlock', devices: pickedDevices }) },
+                  { label: 'Restringir', icon: Ban, onClick: () => setDialog({ kind: 'bulk', action: 'restrict', devices: pickedDevices }) },
+                  { label: 'Quitar restricción', icon: CircleCheck, onClick: () => setDialog({ kind: 'bulk', action: 'unrestrict', devices: pickedDevices }) },
+                  { label: 'Asignar zona', icon: MapPin, onClick: () => setDialog({ kind: 'zone', devices: pickedDevices }) },
+                ]}
+              />
               <IconButton icon={X} label="Quitar la selección" onClick={() => setPicked(new Set())} />
             </div>
           </div>
@@ -1303,6 +1380,19 @@ export default function DevicesPage({
           onDone={() => {
             if (dialog.devices.length > 1) setPicked(new Set());
             data.reload();
+          }}
+        />
+      )}
+      {dialog?.kind === 'bulk' && (
+        <BulkDialog
+          key={dialog.action}
+          kind={dialog.action}
+          devices={dialog.devices}
+          company={company}
+          onChanged={data.reload}
+          onClose={(applied) => {
+            setDialog(null);
+            if (applied) setPicked(new Set());
           }}
         />
       )}

@@ -145,6 +145,7 @@ export default function ZonesPage({ company, data, goDevices, goAlerts }: {
     <>
       <PageHeader
         title="Zonas"
+        help={{ section: 'zonas', label: 'zonas y caídas' }}
         subtitle="Agrupá los equipos por localidad, nodo u OLT. Sirve para mandar un comunicado solo a una parte de la red y para enterarte cuando se caen muchos equipos juntos."
         actions={zones.length > 0 && <Button icon={Plus} disabled={zones.length >= ZONES_MAX} onClick={() => setDialog({ kind: 'create' })}>Nueva zona</Button>}
       />

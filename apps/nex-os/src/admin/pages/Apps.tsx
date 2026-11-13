@@ -68,6 +68,7 @@ export default function AppsPage({ company }: { company: Company }) {
     <>
       <PageHeader
         title="Apps"
+        help={{ section: 'apps', label: 'apps del operador' }}
         subtitle={catalog ? `${enabled.size} de ${catalog.length} habilitadas en los equipos de ${company.name}` : 'Cargando…'}
       />
       <Callout tone="success" icon={ShieldCheck} title="Lista blanca" className="mb-5">

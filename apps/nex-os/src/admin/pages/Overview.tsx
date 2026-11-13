@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Ban,
   Bell,
   ChevronRight,
+  Circle,
   CircleCheck,
   Clock,
   CreditCard,
@@ -10,6 +12,7 @@ import {
   Lock,
   LockOpen,
   MapPin,
+  Plus,
   Power,
   RadioTower,
   RefreshCw,
@@ -21,13 +24,16 @@ import {
   WifiOff,
   type LucideIcon,
 } from 'lucide-react';
-import { deviceStatus, enforcement, EVENT_LABELS, isOnline, type Company, type DeviceEvent, type DeviceStatus, type ZoneStatus } from '../api';
+import { db, deviceStatus, EVENT_LABELS, isOnline, run, type Company, type Device, type DeviceEvent, type DeviceStatus, type ZoneStatus } from '../api';
+import { nextPaidUntil } from '../bulk';
 import { HealthSummary } from '../DeviceHealth';
 import { statusBreakdown } from '../deviceList';
 import { healthIssues, STATUS_META, type Filter } from '../deviceMeta';
-import { relativeTime } from '../format';
+import { formatDate, relativeTime } from '../format';
+import type { CompanySection } from '../routing';
+import { buildTodo, onboardingPending, onboardingSteps, type OnboardingStepId, type TodoItem, type TodoKind } from '../todo';
 import { TONE_DOT, type Tone } from '../tones';
-import { Button, Card, EmptyState, ErrorState, ErrorText, PageHeader, Segmented, Skeleton } from '../ui';
+import { Button, Card, EmptyState, ErrorState, ErrorText, HelpLink, PageHeader, Segmented, Skeleton } from '../ui';
 import type { CompanyData } from '../useCompanyData';
 import { devicesText, NO_ZONE, onlinePercent, outageSince, outageSummary, sortZonesByUrgency, zoneEventDetail, zoneOffline } from '../zones';
 
@@ -64,15 +70,6 @@ const STATUS_FILTER: Partial<Record<DeviceStatus, Filter>> = {
   'por vencer': 'por-vencer',
   'sin conexión': 'offline',
 };
-
-interface Attention {
-  id: string;
-  deviceId: string;
-  title: string;
-  detail: string;
-  tone: 'danger' | 'warning';
-  icon: LucideIcon;
-}
 
 const KPI_TONE: Record<Tone, string> = {
   neutral: 'bg-fill-2 text-fg-3',
@@ -286,12 +283,199 @@ function ZonesCard({ zones, unzoned, now, goDevices, goZones }: {
   );
 }
 
+const TODO_ICON: Record<TodoKind, LucideIcon> = {
+  outage: RadioTower,
+  security: ShieldAlert,
+  overdue: Lock,
+  restricted: Ban,
+  health: HeartPulse,
+  due: CreditCard,
+  offline: WifiOff,
+  pending: Hourglass,
+};
+
+const TODO_SHOWN = 7;
+
+/**
+ * "Para hacer hoy": lo que hay que atender, de lo más urgente a lo que puede esperar, con el botón para resolverlo en el renglón.
+ * Un pago se registra con un toque (un mes más, con Deshacer); el resto abre el equipo o el listado ya filtrado.
+ */
+function TodoCard({ items, devices, onPay, openDevice, goDevices }: {
+  items: TodoItem[];
+  devices: ReadonlyMap<string, Device>;
+  onPay?: (device: Device) => void;
+  openDevice: (id: string) => void;
+  goDevices: (filter: string, zone?: string) => void;
+}) {
+  const [all, setAll] = useState(false);
+  const shown = all ? items : items.slice(0, TODO_SHOWN);
+  const urgent = items.filter((i) => i.tone === 'danger').length;
+  return (
+    <Card
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          Para hacer hoy
+          {urgent > 0 && <span className="inline-flex items-center rounded-md bg-danger-soft px-1.5 py-0.5 text-xs font-medium text-danger ring-1 ring-inset ring-danger">{urgent} {urgent === 1 ? 'urgente' : 'urgentes'}</span>}
+        </span>
+      }
+      description={items.length ? 'Lo más urgente primero. Resolvelo desde acá.' : 'Lo que haya que atender aparece acá, lo más urgente primero.'}
+      padded={false}
+    >
+      {items.length === 0 ? (
+        <EmptyState icon={CircleCheck} title="Todo en orden">No hay caídas, pagos atrasados ni equipos con problemas.</EmptyState>
+      ) : (
+        <>
+          <ul className="divide-y divide-line">
+            {shown.map((item) => {
+              const Icon = TODO_ICON[item.kind];
+              const device = item.deviceId ? devices.get(item.deviceId) : undefined;
+              const open = () => (device ? openDevice(device.id) : goDevices(item.filter ?? 'todos', item.zoneId));
+              const canPay = item.action === 'pay' && device?.paid_until && onPay;
+              return (
+                <li key={item.id} className="flex items-center gap-1 pr-3 sm:pr-4">
+                  <button type="button" onClick={open} className="group flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 pr-2 text-left transition hover:bg-fill sm:pl-5">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${item.tone === 'danger' ? SEVERITY_RING.critical : SEVERITY_RING.warning}`}>
+                      <Icon className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-fg">{item.title}</span>
+                      <span className="block text-[13px] leading-snug text-fg-3 sm:truncate">{item.detail}</span>
+                    </span>
+                    {!canPay && (
+                      <span className="hidden shrink-0 items-center gap-1 text-[13px] font-medium text-fg-2 sm:flex">
+                        {device ? 'Ver equipo' : item.kind === 'outage' ? 'Ver equipos' : `Ver los ${item.count}`}
+                      </span>
+                    )}
+                    {!canPay && <ChevronRight className="h-4 w-4 shrink-0 text-fg-4 transition group-hover:translate-x-0.5 group-hover:text-fg-2" aria-hidden />}
+                  </button>
+                  {item.kind === 'security' && <HelpLink section="seguridad" label="qué hacer con un equipo posiblemente infectado" />}
+                  {canPay && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={CreditCard}
+                      title={`Registrar pago: un mes más, hasta el ${formatDate(nextPaidUntil(device.paid_until))}. Se puede deshacer.`}
+                      aria-label={`Registrar un mes de pago a ${item.title}, hasta el ${formatDate(nextPaidUntil(device.paid_until))}`}
+                      onClick={() => onPay(device)}
+                    >
+                      Pagó 1 mes
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {items.length > TODO_SHOWN && (
+            <div className="border-t border-line px-4 py-2 sm:px-5">
+              <Button size="sm" variant="ghost" className="-ml-2" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+                {all ? 'Ver menos' : `Ver ${items.length - TODO_SHOWN} más`}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+const ONBOARDING: Record<OnboardingStepId, { title: string; text: string; cta: string; section?: CompanySection }> = {
+  device: { title: 'Vinculá el primer equipo', text: 'Encendé un TV box con NEX y cargá el código que muestra en pantalla.', cta: 'Vincular equipo' },
+  brand: { title: 'Cargá el logo y los datos de cobro', text: 'Es lo que ve el cliente en el TV: tu marca, el mensaje de pago y el teléfono.', cta: 'Ir a Marca y cobro', section: 'marca' },
+  alerts: { title: 'Elegí a quién avisar', text: 'Un email o un grupo de Telegram para enterarte de caídas y equipos con problemas.', cta: 'Configurar avisos', section: 'avisos' },
+  zone: { title: 'Creá la primera zona', text: 'Agrupá los equipos por localidad o nodo para detectar caídas y mandar comunicados por zona.', cta: 'Crear zona', section: 'zonas' },
+  team: { title: 'Invitá a un compañero', text: 'Cada persona entra con su cuenta: queda registrado quién hizo cada cosa.', cta: 'Invitar', section: 'miembros' },
+};
+
+const onboardingKey = (companyId: string) => `nex-admin-onboarding-hidden:${companyId}`;
+
+/** Primeros pasos de una empresa nueva. Desaparece sola cuando están todos hechos, o con "Ocultar". */
+function OnboardingCard({ company, deviceCount, zoneCount, zonesKnown, onClaim, goSection }: {
+  company: Company;
+  deviceCount: number;
+  zoneCount: number;
+  /** false si no se pudieron leer las zonas: no se reclama crear una. */
+  zonesKnown: boolean;
+  onClaim?: () => void;
+  goSection: (section: CompanySection) => void;
+}) {
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(onboardingKey(company.id)) === '1';
+    } catch {
+      return false;
+    }
+  });
+  // undefined = todavía no se sabe; null = no se pudo leer (no se reclama invitar a nadie).
+  const [members, setMembers] = useState<number | null | undefined>(undefined);
+  useEffect(() => {
+    if (hidden) return;
+    let cancelled = false;
+    run<{ user_id: string }[]>(db().from('mdm_members').select('user_id').eq('company_id', company.id)).then(
+      (rows) => !cancelled && setMembers(rows?.length ?? null),
+      () => !cancelled && setMembers(null),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [company.id, hidden]);
+
+  if (hidden || members === undefined) return null;
+  const steps = onboardingSteps({ company, deviceCount, zoneCount: zonesKnown ? zoneCount : 1, memberCount: members });
+  const pending = onboardingPending(steps);
+  if (pending === 0) return null;
+  const done = steps.length - pending;
+  const next = steps.find((s) => !s.done)?.id;
+  const hide = () => {
+    setHidden(true);
+    try {
+      localStorage.setItem(onboardingKey(company.id), '1');
+    } catch {
+      /* sin almacenamiento: vuelve a aparecer al recargar */
+    }
+  };
+  return (
+    <Card
+      title="Primeros pasos"
+      description={`${done} de ${steps.length} listos. Cuando termines, esta lista desaparece.`}
+      action={<Button size="sm" variant="ghost" onClick={hide}>Ocultar</Button>}
+      padded={false}
+    >
+      <div className="mx-4 mb-1 mt-3 h-1.5 overflow-hidden rounded-full bg-fill-2 sm:mx-5" role="progressbar" aria-label="Primeros pasos completados" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={done}>
+        <div className="h-full rounded-full bg-ok transition-all" style={{ width: `${(done / steps.length) * 100}%` }} />
+      </div>
+      <ol className="divide-y divide-line">
+        {/* Con la empresa ya andando (faltan uno o dos pasos) solo se listan los que faltan. */}
+        {steps.filter((step) => !step.done || pending > 2).map((step) => {
+          const meta = ONBOARDING[step.id];
+          const act = meta.section ? () => goSection(meta.section!) : onClaim;
+          return (
+            <li key={step.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+              {step.done ? <CircleCheck className="h-5 w-5 shrink-0 text-ok" aria-hidden /> : <Circle className="h-5 w-5 shrink-0 text-fg-4" aria-hidden />}
+              <span className="min-w-0 flex-1">
+                <span className={`block text-sm font-medium ${step.done ? 'text-fg-3 line-through' : 'text-fg'}`}>
+                  {meta.title}
+                  <span className="sr-only">{step.done ? ' (listo)' : ' (pendiente)'}</span>
+                </span>
+                {!step.done && <span className="block text-[13px] leading-snug text-fg-3">{meta.text}</span>}
+              </span>
+              {!step.done && act && <Button size="sm" variant={step.id === next ? 'primary' : 'secondary'} onClick={act}>{meta.cta}</Button>}
+            </li>
+          );
+        })}
+      </ol>
+    </Card>
+  );
+}
+
 export default function OverviewPage({
   company,
   data,
   goDevices,
   goZones,
   openDevice,
+  onPay,
+  onClaim,
+  goSection,
 }: {
   company: Company;
   data: CompanyData;
@@ -299,6 +483,12 @@ export default function OverviewPage({
   goDevices: (filter: string, zone?: string) => void;
   goZones: () => void;
   openDevice: (id: string) => void;
+  /** Registra un mes más de pago al equipo (un toque, con Deshacer). */
+  onPay?: (device: Device) => void;
+  /** Abre el diálogo para vincular un equipo. */
+  onClaim?: () => void;
+  /** Lleva a otra sección (primeros pasos). */
+  goSection?: (section: CompanySection) => void;
 }) {
   const [onlyAlerts, setOnlyAlerts] = useState(true);
   const devices = useMemo(() => data.devices ?? [], [data.devices]);
@@ -315,40 +505,20 @@ export default function OverviewPage({
     };
   }, [devices, company]);
 
-  const attention = useMemo<Attention[]>(() => {
-    const items: Attention[] = [];
-    for (const d of devices) {
-      const name = d.name ?? d.id.slice(0, 8);
-      for (const issue of healthIssues(d)) {
-        items.push({ id: `${d.id}-${issue}`, deviceId: d.id, title: issue, detail: name, tone: 'danger', icon: ShieldAlert });
-      }
-      const score = data.health.get(d.id);
-      if (score?.band === 'problemas') {
-        items.push({
-          id: `${d.id}-health`, deviceId: d.id, title: `Salud baja (${score.score} de 100)`,
-          detail: `${name} · ${score.reasons[0]?.text ?? 'ver detalle'}`, tone: 'danger', icon: HeartPulse,
-        });
-      }
-      if (enforcement(d, company) === 'pendiente') {
-        items.push({ id: `${d.id}-pending`, deviceId: d.id, title: 'Cambio sin aplicar', detail: `${name} · todavía no confirmó`, tone: 'warning', icon: Hourglass });
-      }
-      if (!isOnline(d) && d.offline_alerted_at) {
-        items.push({ id: `${d.id}-offline`, deviceId: d.id, title: 'Sin conexión', detail: `${name} · visto ${relativeTime(d.last_seen_at)}`, tone: 'warning', icon: WifiOff });
-      }
-      if (deviceStatus(d, company) === 'por vencer') {
-        items.push({ id: `${d.id}-due`, deviceId: d.id, title: 'Pago por vencer', detail: name, tone: 'warning', icon: CreditCard });
-      }
-    }
-    return items.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'danger' ? -1 : 1));
-  }, [devices, company, data.health]);
+  const todo = useMemo(
+    () => buildTodo({ devices, company, health: data.health, zones: data.zones, now: data.loadedAt || undefined }),
+    [devices, company, data.health, data.zones, data.loadedAt],
+  );
+  const byId = useMemo(() => new Map(devices.map((d) => [d.id, d])), [devices]);
 
   const unzoned = useMemo(() => devices.filter((d) => !d.zone_id).length, [devices]);
   const zoneIds = useMemo(() => new Set(data.zones.map((z) => z.zone_id)), [data.zones]);
-  const hasOutage = data.zones.some((z) => z.outage_started_at);
   const zonesCard = <ZonesCard zones={data.zones} unzoned={unzoned} now={data.loadedAt} goDevices={goDevices} goZones={goZones} />;
 
   const events = onlyAlerts ? data.events.filter((e) => e.severity !== 'info') : data.events;
-  const ATTENTION_MAX = 8;
+  const onboarding = goSection && data.devices && (
+    <OnboardingCard company={company} deviceCount={devices.length} zoneCount={data.zones.length} zonesKnown={!data.zonesError} onClaim={onClaim} goSection={goSection} />
+  );
 
   return (
     <>
@@ -359,7 +529,12 @@ export default function OverviewPage({
             ? `${company.name} · actualizado a las ${new Date(data.loadedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`
             : company.name
         }
-        actions={<Button variant="secondary" icon={RefreshCw} onClick={data.reload}>Actualizar</Button>}
+        actions={
+          <>
+            <Button variant="secondary" icon={RefreshCw} onClick={data.reload}>Actualizar</Button>
+            {onClaim && <Button icon={Plus} onClick={onClaim}>Vincular equipo</Button>}
+          </>
+        }
       />
       {data.devices && <ErrorText error={data.error} />}
 
@@ -378,20 +553,25 @@ export default function OverviewPage({
           </div>
         )
       ) : devices.length === 0 ? (
+        <div className="flex flex-col gap-4 lg:gap-5">
+        {onboarding}
         <Card>
           <EmptyState
             icon={Tv}
             title="Todavía no hay equipos"
-            action={<Button onClick={() => goDevices('todos')}>Ir a Equipos para vincular el primero</Button>}
+            action={onClaim ? <Button icon={Plus} onClick={onClaim}>Vincular el primer equipo</Button> : <Button onClick={() => goDevices('todos')}>Ir a Equipos para vincular el primero</Button>}
           >
             Encendé un TV box con NEX: muestra un código y un QR. Cuando lo vincules, acá vas a ver cuántos están en línea,
             los pagos por vencer y las alertas.
           </EmptyState>
         </Card>
+        </div>
       ) : (
         <div className="flex flex-col gap-4 lg:gap-5">
-          {/* Una caída masiva es lo primero que hay que ver; sin caídas, las zonas van más abajo. */}
-          {hasOutage && zonesCard}
+          {/* Lo que hay que atender hoy va primero, con el botón para resolverlo ahí mismo. Sin pendientes, primero los pasos que faltan. */}
+          {todo.length === 0 && onboarding}
+          <TodoCard items={todo} devices={byId} onPay={onPay} openDevice={openDevice} goDevices={goDevices} />
+          {todo.length > 0 && onboarding}
           <div className="grid gap-4 lg:gap-5 xl:grid-cols-5">
             <FleetCard company={company} devices={devices} online={stats.online} goDevices={goDevices} />
             <HealthSummary scores={data.health.values()} onOpenLow={() => goDevices('salud-baja')} className="xl:col-span-2" />
@@ -404,50 +584,12 @@ export default function OverviewPage({
             <Kpi label="Alertas de seguridad" hint="Equipos para revisar" value={stats.security} icon={ShieldAlert} tone="danger" onClick={() => goDevices('alertas')} />
           </div>
 
-          {!hasOutage && zonesCard}
+          {zonesCard}
 
-          <div className="grid gap-4 lg:gap-5 xl:grid-cols-5">
-            <Card
-              title="Requiere atención"
-              description={attention.length ? `${attention.length} ${attention.length === 1 ? 'tema' : 'temas'}, lo más grave primero` : 'Lo más grave primero'}
-              className="xl:col-span-2"
-              padded={false}
-            >
-              {attention.length === 0 ? (
-                <EmptyState icon={CircleCheck} title="Todo en orden">No hay equipos con problemas.</EmptyState>
-              ) : (
-                <>
-                  <ul className="divide-y divide-line">
-                    {attention.slice(0, ATTENTION_MAX).map((a) => (
-                      <li key={a.id}>
-                        <button type="button" onClick={() => openDevice(a.deviceId)} className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-fill sm:px-5">
-                          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${a.tone === 'danger' ? SEVERITY_RING.critical : SEVERITY_RING.warning}`}>
-                            <a.icon className="h-4 w-4" aria-hidden />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-fg">{a.title}</span>
-                            <span className="block truncate text-xs text-fg-4">{a.detail}</span>
-                          </span>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-fg-4 transition group-hover:translate-x-0.5 group-hover:text-fg-2" aria-hidden />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  {attention.length > ATTENTION_MAX && (
-                    <div className="border-t border-line px-4 py-2.5 sm:px-5">
-                      <Button size="sm" variant="ghost" className="-ml-2" onClick={() => goDevices('alertas')}>
-                        Y {attention.length - ATTENTION_MAX} más: ver equipos con alertas
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </Card>
-
+          <div>
             <Card
               title="Actividad"
               description="Últimos 7 días"
-              className="xl:col-span-3"
               action={
                 <Segmented
                   label="Qué actividad mostrar"

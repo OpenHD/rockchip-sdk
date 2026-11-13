@@ -8,10 +8,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { ChevronLeft, ChevronRight, CircleCheck, Info, LoaderCircle, RefreshCw, Search, TriangleAlert, X, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CircleCheck, CircleHelp, Info, LoaderCircle, RefreshCw, Search, TriangleAlert, X, type LucideIcon } from 'lucide-react';
 import { useLayer } from './layer';
 import { TONE_DOT, TONE_TEXT, type Tone } from './tones';
-import { ToastContext, type ToastTone } from './toast';
+import { ToastContext, type ToastAction, type ToastTone } from './toast';
 
 /**
  * Primitivas del panel. Los colores salen de los tokens de admin.css (text-fg, bg-surface, border-line…):
@@ -122,11 +122,34 @@ export function Card({
   );
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
+/**
+ * "?" chico que lleva a una sección de la Guía técnica (#/c/<empresa>/guia?s=<sección>).
+ * La empresa sale de la dirección actual; fuera de una empresa no se muestra.
+ */
+export function HelpLink({ section, label, className = '' }: { section: string; label: string; className?: string }) {
+  const companyId = window.location.hash.match(/^#\/c\/([^/?]+)/)?.[1];
+  if (!companyId) return null;
+  return (
+    <a
+      href={`#/c/${companyId}/guia?s=${section}`}
+      title={`Ayuda: ${label}`}
+      aria-label={`Ayuda: ${label}`}
+      data-noprint
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full align-middle text-fg-4 transition hover:bg-fill-2 hover:text-accent ${className}`}
+    >
+      <CircleHelp className="h-4 w-4" aria-hidden />
+    </a>
+  );
+}
+
+export function PageHeader({ title, subtitle, actions, help }: { title: string; subtitle?: ReactNode; actions?: ReactNode; /** Sección de la Guía técnica que explica esta pantalla. */ help?: { section: string; label: string } }) {
   return (
     <div className="mb-5 sm:mb-6">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <h1 className="text-[22px] font-semibold leading-8 tracking-tight text-fg sm:text-2xl">{title}</h1>
+        <h1 className="flex items-center gap-1.5 text-[22px] font-semibold leading-8 tracking-tight text-fg sm:text-2xl">
+          {title}
+          {help && <HelpLink section={help.section} label={help.label} />}
+        </h1>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
       {subtitle && <p className="mt-1 max-w-3xl text-sm leading-5 text-fg-3">{subtitle}</p>}
@@ -661,14 +684,27 @@ export function Menu({
   align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [flip, setFlip] = useState(false);
+  // El contenedor va en estado (no en un ref) porque `toggle` lo mide y se le pasa al botón durante el render.
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  // Si abajo no entra (últimos renglones de un listado), el menú se abre hacia arriba.
+  const toggle = () => {
+    if (!open && box && placement === 'bottom') {
+      const r = box.getBoundingClientRect();
+      // En el celular la barra de accesos de abajo tapa los últimos 56 px.
+      const below = window.innerHeight - r.bottom - (window.innerWidth < 1024 ? 64 : 8);
+      setFlip(below < items.length * 40 + 12 && r.top > below);
+    }
+    setOpen((o) => !o);
+  };
+  const up = placement === 'top' || flip;
 
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     list.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onDown = (e: MouseEvent) => !box?.contains(e.target as Node) && setOpen(false);
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
@@ -682,7 +718,7 @@ export function Menu({
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey, true);
     };
-  }, [open]);
+  }, [open, box]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const dir = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
@@ -696,8 +732,8 @@ export function Menu({
   };
 
   return (
-    <div ref={ref} className="relative">
-      {trigger(() => setOpen((o) => !o), open)}
+    <div ref={setBox} className="relative">
+      {trigger(toggle, open)}
       {open && (
         <div
           ref={list}
@@ -705,7 +741,7 @@ export function Menu({
           onKeyDown={onKeyDown}
           className={`absolute z-30 w-60 animate-[nexIn_.12s_ease-out] rounded-xl border border-line bg-overlay p-1 shadow-pop ${
             align === 'right' ? 'right-0' : 'left-0'
-          } ${placement === 'top' ? 'bottom-full mb-2' : 'mt-1'}`}
+          } ${up ? 'bottom-full mb-2' : 'mt-1'}`}
         >
           {items.map((it) => (
             <button
@@ -738,6 +774,7 @@ interface ToastItem {
   id: number;
   message: string;
   tone: ToastTone;
+  action?: ToastAction;
 }
 
 const TOAST_ICON = { success: CircleCheck, error: TriangleAlert, info: Info };
@@ -748,11 +785,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const nextId = useRef(1);
   const dismiss = useCallback((id: number) => setItems((prev) => prev.filter((t) => t.id !== id)), []);
   const show = useCallback(
-    (message: string, tone: ToastTone = 'success') => {
+    (message: string, tone: ToastTone = 'success', action?: ToastAction) => {
       const id = nextId.current++;
-      setItems((prev) => [...prev.slice(-3), { id, message, tone }]);
-      // Los errores quedan más tiempo: hay que llegar a leerlos.
-      setTimeout(() => dismiss(id), tone === 'error' ? 8000 : 4500);
+      setItems((prev) => [...prev.slice(-3), { id, message, tone, action }]);
+      // Los errores y los avisos con botón (Deshacer) quedan más tiempo: hay que llegar a leerlos.
+      setTimeout(() => dismiss(id), tone === 'error' || action ? 8000 : 4500);
     },
     [dismiss],
   );
@@ -770,6 +807,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div key={t.id} className="pointer-events-auto flex w-full max-w-sm animate-[nexIn_.18s_ease-out] items-start gap-3 rounded-xl border border-line-strong bg-overlay py-3 pl-4 pr-2 text-sm shadow-pop">
               <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${TOAST_TONE[t.tone]}`} aria-hidden />
               <span className="min-w-0 flex-1 break-words text-fg">{t.message}</span>
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismiss(t.id);
+                    t.action!.onClick();
+                  }}
+                  className="-my-1 flex h-7 shrink-0 items-center rounded-md px-2 text-[13px] font-semibold text-accent transition hover:bg-accent-soft"
+                >
+                  {t.action.label}
+                </button>
+              )}
               <button type="button" aria-label="Cerrar aviso" onClick={() => dismiss(t.id)} className="-my-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-4 transition hover:bg-fill-2 hover:text-fg">
                 <X className="h-3.5 w-3.5" aria-hidden />
               </button>
