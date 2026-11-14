@@ -87,10 +87,13 @@ copia NEX a `/system/priv-app` antes de `install-box.sh`. Así sobrevive a un re
 datos), se actualiza sola sin pedir confirmación (`INSTALL_PACKAGES`) y al arrancar `Heal` vuelve a proteger el
 equipo: desactiva el adware y el launcher de fábrica, activa `Guard` y fija la zona horaria. Después de un reset
 vuelve a la pantalla de vinculación: hasta que la empresa lo vincule, solo se puede usar NEX. `--device-admin` además
-declara `android.software.device_admin`. Escribe en la partición del sistema: tener a mano el firmware original.
+declara `android.software.device_admin`. `--bootanim` reemplaza la animación de arranque de fábrica (por ejemplo
+"MBOX") por la de NEX; la de fábrica queda en el equipo como `/system/media/bootanimation.zip.factory`. El zip tiene
+que tener `desc.txt` y los archivos sin comprimir (`zip -0`). Escribe en la partición del sistema: tener a mano el
+firmware original.
 
 ```sh
-apps/nex-tv-android/install-system.sh <ip-del-equipo>:<puerto> --apk nex-tv.apk
+apps/nex-tv-android/install-system.sh <ip-del-equipo>:<puerto> --apk nex-tv.apk --bootanim bootanimation-nex.zip
 ```
 
 **A mano, con Device Owner.** Requiere ADB por red o USB y que el equipo **no tenga cuentas** (recién reseteado), si
