@@ -1,0 +1,292 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Sistema de diseño del panel NEX MDM.
+ *
+ * Los colores viven en variables (tokens) con un valor para el tema oscuro y otro para el claro.
+ * Los componentes usan las utilidades semánticas de más abajo (text-fg, bg-surface, border-line…),
+ * nunca colores fijos de Tailwind: así los dos temas salen del mismo marcado.
+ * Excepción a propósito: las vistas previas del TV (siempre oscuras) y el texto blanco sobre botones de color.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Superficies */
+  --bg: #0a0c11;
+  --surface: #11141b;
+  --surface-2: #171b24;
+  --overlay: #171b24;
+  --field: #0d1016;
+  --fill: rgb(255 255 255 / 0.045);
+  --fill-2: rgb(255 255 255 / 0.08);
+  --fill-3: rgb(255 255 255 / 0.16);
+  --inset: rgb(0 0 0 / 0.28);
+  --scrim: rgb(3 5 10 / 0.66);
+
+  /* Líneas */
+  --line: rgb(255 255 255 / 0.08);
+  --line-strong: rgb(255 255 255 / 0.15);
+
+  /* Texto: fuerte, normal, secundario, tenue (todos ≥ 4.5:1 sobre --surface) */
+  --fg: #f5f6f8;
+  --fg-2: #d3d7df;
+  --fg-3: #a3a9b6;
+  --fg-4: #838a99;
+
+  /* Acento y tonos de estado: texto, sólido (puntos, barras, botones), fondo suave, borde suave.
+     Los sólidos que llevan texto blanco encima (botones) dan ≥ 4.5:1. */
+  --accent: #a9b0ff;
+  --accent-solid: #5a5fe6;
+  --accent-solid-hover: #4d52d6;
+  --accent-soft: rgb(110 116 245 / 0.15);
+  --accent-line: rgb(129 136 250 / 0.42);
+
+  --ok: #62dfae;
+  --ok-solid: #22b983;
+  --ok-strong: #0c7a57;
+  --ok-soft: rgb(16 185 129 / 0.12);
+  --ok-line: rgb(16 185 129 / 0.32);
+
+  --warn: #fbcb5b;
+  --warn-solid: #f0a51c;
+  --warn-soft: rgb(245 158 11 / 0.12);
+  --warn-line: rgb(245 158 11 / 0.32);
+
+  --danger: #ff9fae;
+  --danger-solid: #d92d50;
+  --danger-solid-hover: #c32444;
+  --danger-soft: rgb(244 63 94 / 0.12);
+  --danger-line: rgb(244 63 94 / 0.34);
+
+  --neutral-solid: #5d6473;
+
+  --ring: #8f96ff;
+  --shadow-card: 0 0 0 0 transparent;
+  --shadow-pop: 0 18px 50px -12px rgb(0 0 0 / 0.7), 0 4px 14px -6px rgb(0 0 0 / 0.5);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --surface-2: #f6f7f9;
+  --overlay: #ffffff;
+  --field: #ffffff;
+  --fill: rgb(15 23 42 / 0.04);
+  --fill-2: rgb(15 23 42 / 0.075);
+  --fill-3: rgb(15 23 42 / 0.2);
+  --inset: rgb(15 23 42 / 0.045);
+  --scrim: rgb(15 20 35 / 0.45);
+
+  --line: rgb(15 23 42 / 0.1);
+  --line-strong: rgb(15 23 42 / 0.2);
+
+  --fg: #0e121d;
+  --fg-2: #2a303f;
+  --fg-3: #535b6c;
+  --fg-4: #687083;
+
+  --accent: #4338ca;
+  --accent-solid: #4f46e5;
+  --accent-solid-hover: #4338ca;
+  --accent-soft: rgb(79 70 229 / 0.09);
+  --accent-line: rgb(79 70 229 / 0.35);
+
+  --ok: #04704f;
+  --ok-solid: #0e9f6e;
+  --ok-strong: #0c7a57;
+  --ok-soft: rgb(16 185 129 / 0.13);
+  --ok-line: rgb(5 150 105 / 0.35);
+
+  --warn: #8f4a06;
+  --warn-solid: #e08a00;
+  --warn-soft: rgb(245 158 11 / 0.16);
+  --warn-line: rgb(217 119 6 / 0.4);
+
+  --danger: #b4123a;
+  --danger-solid: #d92d50;
+  --danger-solid-hover: #c32444;
+  --danger-soft: rgb(244 63 94 / 0.1);
+  --danger-line: rgb(225 29 72 / 0.35);
+
+  --neutral-solid: #9aa1af;
+
+  --ring: #4f46e5;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.05);
+  --shadow-pop: 0 18px 50px -12px rgb(15 23 42 / 0.28), 0 4px 14px -6px rgb(15 23 42 / 0.14);
+}
+
+/* :root body le gana a las clases de color fijas que trae el <body> de admin.html. */
+:root body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--fg-2);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fill-3) transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Foco visible y parejo en todo el panel (teclado). Los campos de texto usan su propio anillo. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
+[data-theme='light'] input[type='date']::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
+@layer components {
+  /* Tamaños que cambian en el celular (dedo) y que una utilidad puntual (h-11, text-2xl…) puede pisar. */
+  .nx-input { font-size: 0.875rem; line-height: 1.25rem; min-height: 2.25rem; }
+  .nx-btn-md { height: 2.25rem; padding-inline: 0.875rem; font-size: 0.875rem; gap: 0.5rem; }
+  .nx-btn-sm { height: 2rem; padding-inline: 0.75rem; font-size: 0.8125rem; gap: 0.375rem; }
+  .nx-icon-btn { height: 2rem; width: 2rem; }
+  /* Tecla en una ayuda de atajos (Ctrl K, Enter…). */
+  .nx-kbd {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 1.25rem; height: 1.25rem; padding-inline: 0.3rem;
+    border-radius: 0.3rem; border: 1px solid var(--line-strong); background: var(--fill);
+    font-family: inherit; font-size: 0.6875rem; line-height: 1; color: var(--fg-3);
+  }
+  @media (max-width: 639px) {
+    /* 16 px evita el zoom automático de iOS al enfocar un campo. */
+    .nx-input { font-size: 1rem; line-height: 1.5rem; min-height: 2.75rem; }
+    .nx-btn-md { height: 2.75rem; }
+    .nx-btn-sm { height: 2.25rem; }
+    .nx-icon-btn { height: 2.5rem; width: 2.5rem; }
+  }
+}
+
+@layer utilities {
+  /* Texto */
+  .text-fg { color: var(--fg); }
+  .text-fg-2 { color: var(--fg-2); }
+  .text-fg-3 { color: var(--fg-3); }
+  .text-fg-4 { color: var(--fg-4); }
+  .text-accent { color: var(--accent); }
+  .text-ok { color: var(--ok); }
+  .text-warn { color: var(--warn); }
+  .text-danger { color: var(--danger); }
+  .text-ok-solid { color: var(--ok-solid); }
+  .text-warn-solid { color: var(--warn-solid); }
+  .text-danger-solid { color: var(--danger-solid); }
+  .text-neutral-solid { color: var(--neutral-solid); }
+  .text-track { color: var(--fill-2); }
+
+  /* Fondos */
+  .bg-app { background-color: var(--bg); }
+  .bg-surface { background-color: var(--surface); }
+  .bg-surface-2 { background-color: var(--surface-2); }
+  .bg-overlay { background-color: var(--overlay); }
+  .bg-field { background-color: var(--field); }
+  .bg-fill { background-color: var(--fill); }
+  .bg-fill-2 { background-color: var(--fill-2); }
+  .bg-fill-3 { background-color: var(--fill-3); }
+  .bg-inset { background-color: var(--inset); }
+  .bg-scrim { background-color: var(--scrim); }
+  .bg-accent { background-color: var(--accent-solid); }
+  .bg-accent-hover { background-color: var(--accent-solid-hover); }
+  .bg-accent-soft { background-color: var(--accent-soft); }
+  .bg-ok { background-color: var(--ok-solid); }
+  .bg-ok-strong { background-color: var(--ok-strong); }
+  .bg-ok-soft { background-color: var(--ok-soft); }
+  .bg-warn { background-color: var(--warn-solid); }
+  .bg-warn-soft { background-color: var(--warn-soft); }
+  .bg-danger { background-color: var(--danger-solid); }
+  .bg-danger-hover { background-color: var(--danger-solid-hover); }
+  .bg-danger-soft { background-color: var(--danger-soft); }
+  .bg-neutral { background-color: var(--neutral-solid); }
+
+  /* Bordes, divisores y anillos */
+  .border-line { border-color: var(--line); }
+  .border-line-strong { border-color: var(--line-strong); }
+  .border-accent { border-color: var(--accent-line); }
+  .border-ok { border-color: var(--ok-line); }
+  .border-warn { border-color: var(--warn-line); }
+  .border-danger { border-color: var(--danger-line); }
+  .divide-line > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
+  .ring-line { --tw-ring-color: var(--line); }
+  .ring-line-strong { --tw-ring-color: var(--line-strong); }
+  .ring-accent { --tw-ring-color: var(--accent-line); }
+  .ring-ok { --tw-ring-color: var(--ok-line); }
+  .ring-warn { --tw-ring-color: var(--warn-line); }
+  .ring-danger { --tw-ring-color: var(--danger-line); }
+  .border-focus { border-color: var(--ring); }
+  .ring-focus { --tw-ring-color: color-mix(in srgb, var(--ring) 28%, transparent); }
+
+  /* Elevación */
+  .shadow-card { box-shadow: var(--shadow-card); }
+  .shadow-pop { box-shadow: var(--shadow-pop); }
+
+  /* Fila de chips o pestañas que se desliza de costado en el celular, sin barra a la vista. */
+  .scroll-x {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .scroll-x::-webkit-scrollbar { display: none; }
+
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+
+@keyframes nexIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes nexSlide {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes nexSlideLeft {
+  from { transform: translateX(-24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes nexSheet {
+  from { transform: translateY(32px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes nexFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* Impresión (Guía técnica → "Imprimir / Guardar PDF"): solo el contenido, sin el armazón del panel.
+   La página pasa al tema claro antes de imprimir (ver pages/Guide.tsx). */
+@media print {
+  [data-noprint] { display: none !important; }
+  :root body { background: #fff; }
+  main { max-width: none !important; padding: 0 !important; }
+  a { text-decoration: none; }
+  .print-keep { break-inside: avoid; }
+  @page { margin: 14mm 12mm; }
+}

@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""NEX CLI: explicit targets, build orchestration and read-only install plans."""
+import argparse
+import os
+import re
+from pathlib import Path
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent
+HI_SOC = 'hi3798mv300h'
+HI_BOARD = 'juw7.820.00218613'
+BANNER = r'''
+     _   _   _____  __   __
+    | \ | | | ____| \ \ / /
+    |  \| | |  _|    \ V /
+    | |\  | | |___   / . \
+    |_| \_| |_____| /_/ \_\
+    +----------------------------------------+
+    |                NEX - OS                |
+    |               Installer                |
+    +----------------------------------------+
+       SELECT > CHECK > BUILD > BRING-UP
+'''
+
+
+# ANSI stays local to the CLI; subprocess output is left untouched.
+PALETTE = {
+    'cyan': '1;36', 'blue': '1;34', 'purple': '1;35',
+    'green': '1;32', 'yellow': '1;33', 'red': '1;31',
+}
+STATUS_COLORS = {
+    'OK': 'green', 'RUN': 'cyan', 'TARGET': 'cyan', 'BUILD': 'blue',
+    'IMAGE': 'purple', 'NOTE': 'yellow', 'NEXT': 'cyan', 'GATE': 'yellow',
+    'MISSING': 'red', 'BLOCKED': 'red', 'LOCKED': 'yellow',
+    'ERROR': 'red', 'CANCELLED': 'yellow',
+    'HISILICON': 'purple', 'ROCKCHIP': 'cyan',
+}
+
+
+def paint(text, color, stream=None):
+    stream = sys.stdout if stream is None else stream
+    if 'NO_COLOR' in os.environ or os.environ.get('TERM') == 'dumb' or not stream.isatty():
+        return text
+    return f"\033[{PALETTE[color]}m{text}\033[0m"
+
+
+def emit(text='', *, file=None, flush=False):
+    stream = sys.stdout if file is None else file
+    if text == BANNER:
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            color = 'cyan' if index < 6 else ('purple' if index < 10 else 'blue')
+            print(paint(line, color, stream), file=stream)
+        return
+    match = re.search(r'\[([^]]+)\]', text)
+    if match:
+        color = STATUS_COLORS.get(match.group(1), 'cyan')
+        text = text[:match.start()] + paint(match.group(), color, stream) + text[match.end():]
+    print(text, file=stream, flush=flush)
+
+
+def profiles():
+    base = ROOT / 'device/rockchip/.chips'
+    return {f'{p.parent.name}:{p.name}': p for p in sorted(base.glob('*/*defconfig')) if p.is_file()}
+
+
+def target(args):
+    if args.soc == HI_SOC and args.board == HI_BOARD and not args.profile:
+        return ['--soc', HI_SOC, '--board', HI_BOARD]
+    if args.soc == 'rockchip' and not args.board and args.profile in profiles():
+        return [args.profile]
+    raise ValueError('Selecciona HiSilicon con --soc hi3798mv300h --board juw7.820.00218613, o Rockchip con --soc rockchip --profile chip:defconfig del catálogo.')
+
+
+def run(command):
+    emit('[RUN] ' + shlex.join(map(str, command)), flush=True)
+    return subprocess.run(command, cwd=ROOT, check=False).returncode
+
+
+def doctor(args):
+    selection = target(args)
+    if args.soc == HI_SOC:
+        return run(['bash', ROOT / 'build.sh', *selection, 'check'])
+    checks = [
+        ('Host Linux x86_64 del SDK', platform.system() == 'Linux' and platform.machine() == 'x86_64'),
+        ('Perfil existente (compatibilidad física pendiente)', args.profile in profiles()),
+        *[(f'Comando {name}', shutil.which(name) is not None) for name in ('bash', 'make', 'gcc', 'g++', 'rsync', 'python3', 'node', 'npm')],
+    ]
+    for label, ok in checks:
+        emit(f"[{'OK' if ok else 'MISSING'}] {label}")
+    emit('[NOTE] Diagnóstico inicial; el SDK comprueba dependencias adicionales. No verifica la placa conectada.')
+    return 0 if all(ok for _, ok in checks) else 1
+
+
+def plan(args):
+    selection = target(args)
+    emit('[TARGET] ' + ' '.join(selection))
+    if args.soc == HI_SOC:
+        emit('[BLOCKED] Variante probable; faltan BSP, DTB de board, bootloader y contrato de imagen.')
+        emit('[NEXT] Capturar boot log y validar Linux mínimo hasta shell. No hay imagen instalable.')
+        return 1
+    image = ROOT / 'output/firmware/update.img'
+    emit('[BUILD] ' + shlex.join(['./nex', 'build', '--soc', 'rockchip', '--profile', args.profile]))
+    emit(f"[IMAGE] {image} ({'presente; procedencia no verificada' if image.is_file() else 'ausente'})")
+    emit('[GATE] Confirmar modelo físico, DDR, perfil, procedencia de imagen y respaldo antes de instalar.')
+    emit('[LOCKED] Escritura al dispositivo deshabilitada en esta fase. No se invoca rkflash.sh.')
+    return 0
+
+
+def wizard():
+    emit(BANNER)
+    emit('  [1] HiSilicon / JUW7.820.00218613 (bring-up bloqueado)')
+    emit('  [2] Rockchip / seleccionar perfil existente')
+    emit('  [0] Salir')
+    choice = input(paint('\n  Plataforma > ', 'purple')).strip()
+    if choice == '0':
+        return 0
+    if choice == '1':
+        opts = ['--soc', HI_SOC, '--board', HI_BOARD]
+    elif choice == '2':
+        catalog = list(profiles())
+        for index, profile in enumerate(catalog, 1):
+            emit(f'  [{index:3}] {profile}')
+        index = input(paint('  Perfil > ', 'purple')).strip()
+        if not index.isdigit() or not 1 <= int(index) <= len(catalog):
+            raise ValueError('Perfil inválido')
+        opts = ['--soc', 'rockchip', '--profile', catalog[int(index) - 1]]
+    else:
+        raise ValueError('Plataforma inválida')
+    emit('\n  [1] Diagnóstico  [2] Plan de instalación  [0] Salir')
+    action = input(paint('  Acción > ', 'purple')).strip()
+    if action == '0':
+        return 0
+    command = {'1': 'doctor', '2': 'plan'}.get(action)
+    if not command:
+        raise ValueError('Acción inválida')
+    return main([command, *opts])
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='NEX - OS Installer — selección, diagnóstico, build y plan de instalación seguro.')
+    sub = parser.add_subparsers(dest='command')
+    sub.add_parser('targets', help='listar targets y perfiles disponibles')
+    sub.add_parser('wizard', help='asistente ASCII interactivo de solo lectura')
+    for name in ('doctor', 'plan', 'build', 'install'):
+        p = sub.add_parser(name)
+        p.add_argument('--soc', required=True, choices=('rockchip', HI_SOC))
+        p.add_argument('--board')
+        p.add_argument('--profile', help='Rockchip: chip:defconfig exacto del catálogo')
+        if name == 'build':
+            p.add_argument('--stage', choices=('all', 'kernel', 'rootfs', 'dtb', 'bootloader', 'image', 'toolchain'), default='all')
+            p.add_argument('--with-ui', action='store_true', help='compilar NEX web en el overlay Rockchip antes del firmware')
+        if name == 'install':
+            p.add_argument('--dry-run', action='store_true', help='mostrar plan; no escribir al dispositivo')
+    args = parser.parse_args(argv)
+    if args.command is None:
+        if sys.stdin.isatty():
+            return wizard()
+        parser.print_help()
+        return 0
+    if args.command == 'wizard':
+        if not sys.stdin.isatty():
+            raise ValueError('wizard requiere una terminal interactiva; usa targets, doctor o plan en scripts.')
+        return wizard()
+    if args.command == 'targets':
+        emit(BANNER)
+        emit(f'[HISILICON] {HI_SOC} / {HI_BOARD} — probable, BSP pendiente')
+        for profile in profiles():
+            emit('[ROCKCHIP] ' + profile)
+        return 0
+    selection = target(args)
+    if args.command == 'doctor':
+        return doctor(args)
+    if args.command in ('plan', 'install'):
+        result = plan(args)
+        if args.command == 'install' and not args.dry_run:
+            emit('[BLOCKED] Instalación física deshabilitada. Usa install --dry-run para revisar el plan.', file=sys.stderr)
+            return 1
+        return result
+    if args.soc == HI_SOC:
+        if args.with_ui:
+            raise ValueError('NEX UI aún no está habilitada para HiSilicon.')
+        return run(['bash', ROOT / 'build.sh', *selection, args.stage])
+    if args.stage not in ('all', 'kernel', 'rootfs'):
+        raise ValueError('Rockchip admite all, kernel y rootfs en este CLI; usa build.sh para otros targets vendor.')
+    if doctor(args):
+        return 1
+    if args.with_ui:
+        result = run(['bash', ROOT / 'tools/nex-os/build.sh'])
+        if result:
+            return result
+    result = run(['bash', ROOT / 'build.sh', *selection])
+    if result:
+        return result
+    return run(['bash', ROOT / 'build.sh', args.stage])
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (ValueError, OSError) as error:
+        emit(f'[ERROR] {error}', file=sys.stderr)
+        sys.exit(2)
+    except (KeyboardInterrupt, EOFError):
+        emit('\n[CANCELLED]')
+        sys.exit(130)

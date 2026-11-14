@@ -1,0 +1,3 @@
+# Cloudflare Pages. Pages ya sirve admin.html en /admin.
+/ /admin 302
+/admin/ /admin 301

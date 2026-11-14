@@ -26,13 +26,6 @@
 		};
 	};
 
-	ir-receiver {
-		compatible = "gpio-ir-receiver";
-		gpios = <&gpio2 RK_PA2 GPIO_ACTIVE_LOW>;
-		pinctrl-0 = <&ir_int>;
-		pinctrl-names = "default";
-	};
-
 	leds {
 		compatible = "gpio-leds";
 		pinctrl-0 = <&cyx_led_pin>;
@@ -50,6 +43,19 @@
 		pinctrl-0 = <&wifi_enable_h>;
 		pinctrl-names = "default";
 		reset-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
+	};
+
+	/*
+	 * NEX-OS: el kernel BSP enciende el Wi-Fi SDIO con rfkill-wlan. El tipo
+	 * de chip sale del relevamiento (identificar.sh, vendor/device SDIO):
+	 * los Realtek necesitan el prefijo "rtl" (ej. "rtl8189fs").
+	 */
+	wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <&grf>;
+		wifi_chip_type = "rtl8189fs";
+		sdio_vref = <1800>;
+		status = "okay";
 	};
 
 	spdif-sound {
@@ -140,6 +146,10 @@
 	status = "okay";
 };
 
+&avsd {
+	status = "okay";
+};
+
 &cpu0 {
 	cpu-supply = <&vdd_arm>;
 };
@@ -164,6 +174,19 @@
 	opp-1296000000 {
 		status = "disabled";
 	};
+};
+
+&dfi {
+	status = "okay";
+};
+
+&display_subsystem {
+	status = "okay";
+};
+
+&dmc {
+	center-supply = <&vdd_log>;
+	status = "okay";
 };
 
 &emmc {
@@ -209,6 +232,14 @@
 	status = "okay";
 };
 
+&iep {
+	status = "okay";
+};
+
+&iep_mmu {
+	status = "okay";
+};
+
 &io_domains {
 	pmuio-supply = <&vccio_3v3>;
 	vccio1-supply = <&vccio_3v3>;
@@ -220,13 +251,11 @@
 	status = "okay";
 };
 
-&pinctrl {
-	ir {
-		ir_int: ir-int {
-			rockchip,pins = <2 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
+&mpp_srv {
+	status = "okay";
+};
 
+&pinctrl {
 	leds {
 		cyx_led_pin: cyx-led-pin {
 			rockchip,pins = <2 RK_PC7 RK_FUNC_GPIO &pcfg_pull_none>;
@@ -277,6 +306,102 @@
 &pwm1 {
 	pinctrl-0 = <&pwm1_pin_pull_up>;
 	pinctrl-names = "active";
+	status = "okay";
+};
+
+/*
+ * Control remoto: driver BSP rockchip,remotectl-pwm (pin IR del SoC, GPIO2_A2).
+ * Cada control tiene su "usercode". Para uno nuevo: copiar el bloque ir_key del
+ * DTS original (identificar.sh lo extrae del Android) o leerlo en el equipo con
+ *   echo 1 > /sys/module/rockchip_pwm_remotectl/parameters/code_print; dmesg -w
+ * OK va como KEY_ENTER (la UI lo usa para activar) y la casita como
+ * KEY_HOMEPAGE (Chromium vuelve a NEX-OS).
+ */
+&pwm3 {
+	status = "okay";
+	compatible = "rockchip,remotectl-pwm";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwmir_pin>;
+	remote_pwm_id = <3>;
+	handle_cpu_id = <1>;
+	remote_support_psci = <1>;
+
+	/* Controles de referencia Rockchip (los de muchos TV box genéricos). */
+	ir_key1 {
+		rockchip,usercode = <0x4040>;
+		rockchip,key_table =
+			<0xf2	KEY_ENTER>,
+			<0xba	KEY_BACK>,
+			<0xf4	KEY_UP>,
+			<0xf1	KEY_DOWN>,
+			<0xef	KEY_LEFT>,
+			<0xee	KEY_RIGHT>,
+			<0xbd	KEY_HOMEPAGE>,
+			<0xea	KEY_VOLUMEUP>,
+			<0xe3	KEY_VOLUMEDOWN>,
+			<0xb2	KEY_POWER>,
+			<0xbc	KEY_MUTE>,
+			<0xec	KEY_MENU>;
+	};
+
+	ir_key2 {
+		rockchip,usercode = <0xff00>;
+		rockchip,key_table =
+			<0x39	KEY_POWER>,
+			<0x73	KEY_MUTE>,
+			<0xa4	KEY_PLAYPAUSE>,
+			<0x75	KEY_VOLUMEDOWN>,
+			<0x77	KEY_VOLUMEUP>,
+			<0x7d	KEY_MENU>,
+			<0xf9	KEY_HOMEPAGE>,
+			<0x5f	KEY_BACK>,
+			<0xb9	KEY_UP>,
+			<0xe9	KEY_DOWN>,
+			<0xb8	KEY_LEFT>,
+			<0xea	KEY_RIGHT>,
+			<0xaa	KEY_ENTER>,
+			<0x55	KEY_1>,
+			<0x5b	KEY_2>,
+			<0xf8	KEY_3>,
+			<0x57	KEY_4>,
+			<0xed	KEY_5>,
+			<0xee	KEY_6>,
+			<0x59	KEY_7>,
+			<0xf1	KEY_8>,
+			<0xf2	KEY_9>,
+			<0x79	KEY_0>,
+			<0xe0	KEY_BACKSPACE>;
+	};
+
+	ir_key3 {
+		rockchip,usercode = <0x1dcc>;
+		rockchip,key_table =
+			<0xee	KEY_ENTER>,
+			<0xf0	KEY_BACK>,
+			<0xf8	KEY_UP>,
+			<0xbb	KEY_DOWN>,
+			<0xef	KEY_LEFT>,
+			<0xed	KEY_RIGHT>,
+			<0xfc	KEY_HOMEPAGE>,
+			<0xf1	KEY_VOLUMEUP>,
+			<0xfd	KEY_VOLUMEDOWN>,
+			<0xff	KEY_POWER>,
+			<0xf3	KEY_MUTE>,
+			<0xbf	KEY_MENU>;
+	};
+};
+
+/* Decodificación de video por hardware (MPP): sin esto el video va por CPU. */
+&rga {
+	status = "okay";
+};
+
+&rkvdec {
+	vcodec-supply = <&vdd_log>;
+	status = "okay";
+};
+
+&rkvdec_mmu {
 	status = "okay";
 };
 
@@ -365,10 +490,26 @@
 	status = "okay";
 };
 
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vepu_mmu {
+	status = "okay";
+};
+
 &vop {
 	status = "okay";
 };
 
 &vop_mmu {
+	status = "okay";
+};
+
+&vpu_mmu {
 	status = "okay";
 };

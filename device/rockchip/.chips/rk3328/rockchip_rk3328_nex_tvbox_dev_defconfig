@@ -1,0 +1,8 @@
+# Igual que rockchip_rk3328_nex_tvbox_defconfig pero SIN endurecer: deja ADB, la
+# consola serie y la VT. Solo para los primeros equipos de prueba en el taller.
+RK_KERNEL_DTS_NAME="rk3318-a95x-z2"
+RK_KERNEL_CFG_FRAGMENTS="nex-mdm.config nex-lowmem.config"
+# Rootfs liviano para 1 GB (buildroot/configs/rockchip_rk3328_nex_defconfig).
+RK_BUILDROOT_BASE_CFG="rk3328_nex"
+RK_PARAMETER="parameter-nex.txt"
+# RK_NEX_MDM_HARDEN is not set

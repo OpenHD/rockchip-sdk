@@ -1,0 +1,40 @@
+#!/bin/sh
+# Memoria de NEX-OS en TV box de 1 GB (Chromium + video ocupan casi todo):
+# - zram: swap comprimido en RAM (lz4, ~3:1). Las pestañas y heaps de JS que no se
+#   usan se comprimen en vez de que el OOM mate Chromium a mitad de un video.
+# - Sin swap en el eMMC: es lento y se gasta.
+# - Reserva para el Wi-Fi y el decodificador de video, que piden memoria en
+#   contexto atómico: si no hay, se corta la conexión o el video.
+
+case "$1" in
+start) ;;
+*) exit 0 ;;
+esac
+
+mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+
+ZRAM=/sys/block/zram0
+[ -e $ZRAM ] || modprobe zram 2>/dev/null
+if [ -e $ZRAM ] && ! grep -q '^/dev/zram0 ' /proc/swaps; then
+	grep -qw lz4 $ZRAM/comp_algorithm && echo lz4 > $ZRAM/comp_algorithm
+	# Mitad de la RAM: con ~3:1 ocupa ~170 MB reales cuando está llena.
+	echo "$((mem_kb / 2))K" > $ZRAM/disksize &&
+		mkswap /dev/zram0 >/dev/null &&
+		swapon /dev/zram0 &&
+		logger -t nex-memory "zram: $((mem_kb / 2048)) MB ($(cat $ZRAM/comp_algorithm | sed 's/.*\[\(.*\)\].*/\1/'))"
+fi
+
+sysctl_set() { [ -w "/proc/sys/$1" ] && echo "$2" > "/proc/sys/$1"; }
+# zram es barato: preferir comprimir páginas anónimas a tirar caché de archivos
+# (la UI y las librerías de Chromium se volverían a leer del eMMC).
+sysctl_set vm/swappiness 100
+# Leer de a una página: en zram no hay latencia de disco que amortizar.
+sysctl_set vm/page-cluster 0
+sysctl_set vm/min_free_kbytes 12288
+# kswapd empieza antes y libera de a más: menos bloqueos de Chromium esperando memoria.
+sysctl_set vm/watermark_scale_factor 100
+# Escrituras al eMMC (descarga de OTA) en tandas chicas: no se acumulan cientos de MB sucios.
+sysctl_set vm/dirty_background_ratio 5
+sysctl_set vm/dirty_ratio 10
+
+exit 0

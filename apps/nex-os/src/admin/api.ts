@@ -1,0 +1,444 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseErrorMessage } from '../lib/supabase';
+import { getAdminSupabase } from './supabaseAdmin';
+import type { NetDiag, NetQuick } from './health';
+
+export interface Company {
+  id: string;
+  name: string;
+  offline_lock_days: number;
+  lock_message: string;
+  logo_path: string | null;
+  timezone: string;
+  payment_grace_days: number;
+  payment_warning_days: number;
+  payment_message: string;
+  /** v9: días después del vencimiento para pasar a "restringido". null = sin etapa (o sin efecto si >= gracia). */
+  payment_restrict_days: number | null;
+  /** v9: datos de pago que se muestran en el TV (la URL como QR). */
+  payment_phone: string | null;
+  payment_url: string | null;
+  alert_telegram_chat_id: string | null;
+  alert_emails: string[];
+  alert_offline_hours: number;
+  alert_kinds: AlertKind[];
+  alert_digest: boolean;
+}
+
+export type AlertKind = 'lock_applied' | 'unlock_applied' | 'tamper' | 'offline' | 'piracy';
+
+export interface DeviceHealth {
+  mode?: string;
+  lock_kind?: string | null;
+  hardened?: boolean;
+  dns_filter?: boolean;
+  firewall?: boolean;
+  /** Android: filtro anti-piratería dentro de las apps de NEX TV (no hay DNS ni firewall de sistema). */
+  webview_filter?: boolean;
+  platform?: string;
+  build?: number;
+  version?: string;
+  uptime?: number;
+  free_mb?: number;
+  agent?: number;
+  /** v12 (NEX TV Android): temperatura máxima de las zonas térmicas, °C. */
+  temp_c?: number | null;
+  ram_avail_mb?: number;
+  ram_total_mb?: number;
+  /** Android avisa que se está quedando sin memoria. */
+  low_mem?: boolean;
+  /** Almacenamiento total de datos, MB. */
+  storage_mb?: number;
+  /** Medición liviana de red (cada 5 min). */
+  net?: NetQuick;
+  /** Mbps subidos por el equipo sin contar a NEX, promedio de 5 min (ver FactoryRisk en NEX TV). */
+  up_mbps?: number;
+  /** Puertas traseras del firmware de fábrica que siguen abiertas. Vacío = ninguna. */
+  factory?: FactoryRisk;
+}
+
+/** Lo que NEX TV encontró del firmware de fábrica vulnerable (los HiSilicon del incidente de CAPPI). */
+export interface FactoryRisk {
+  /** 40000 = shell root remoto (cmd_root), 5555 = ADB por red. */
+  ports?: number[];
+  su?: boolean;
+  pkgs?: string[];
+}
+
+export interface DeviceEvent {
+  id: number;
+  device_id: string | null;
+  kind: string;
+  category: string;
+  severity: 'info' | 'warning' | 'critical';
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export const EVENT_LABELS: Record<string, string> = {
+  lock_applied: 'Bloqueo aplicado',
+  unlock_applied: 'Desbloqueo aplicado',
+  clock_rollback: 'Reloj atrasado (intento de evitar el bloqueo)',
+  policy_tampered: 'Política de navegación modificada',
+  agent_restarted: 'Agente reiniciado sin reiniciar el equipo',
+  image_not_hardened: 'Imagen sin modo TV cerrado',
+  dns_filter_down: 'Filtro DNS caído',
+  firewall_unavailable: 'Firewall no disponible',
+  reflashed: 'Equipo reinstalado/reseteado (re-vinculado solo)',
+  offline: 'Sin conexión',
+  back_online: 'De nuevo en línea',
+  piracy_attempt: 'Intento de abrir sitio pirata',
+  agent_started: 'Equipo encendido',
+  test: 'Aviso de prueba',
+  update_started: 'Actualización de NEX TV en curso',
+  update_installed: 'NEX TV actualizado',
+  update_failed: 'Falló la actualización de NEX TV',
+  update_rejected: 'Actualización de NEX TV rechazada',
+  app_installed: 'App del operador instalada',
+  app_install_failed: 'No se pudo instalar una app del operador',
+  app_removed: 'App del operador desinstalada',
+  upload_anomaly: 'Subida alta sin uso (posible equipo infectado)',
+  factory_backdoor: 'Puertas traseras de fábrica abiertas',
+  zone_outage: 'Caída masiva en una zona',
+  zone_restored: 'Zona recuperada',
+};
+
+export const DEVICE_COLUMNS =
+  'id, company_id, name, locked, lock_reason, firmware_version, last_seen_at, paired_at, paid_until, health, reported_mode, reported_lock_kind, reported_at, offline_alerted_at, external_ref, restricted, restrict_reason, diag_requested_at, net_diag, net_diag_at, zone_id' as const;
+
+export interface Device {
+  id: string;
+  company_id: string;
+  name: string | null;
+  locked: boolean;
+  lock_reason: string | null;
+  firmware_version: string | null;
+  last_seen_at: string | null;
+  paired_at: string | null;
+  paid_until: string | null;
+  health: DeviceHealth;
+  reported_mode: string | null;
+  reported_lock_kind: string | null;
+  reported_at: string | null;
+  offline_alerted_at: string | null;
+  /** N.º de cliente del ISP (único por empresa). */
+  external_ref: string | null;
+  /** v9: restricción manual (menú y red sí, apps no). */
+  restricted: boolean;
+  restrict_reason: string | null;
+  /** v12: último pedido de diagnóstico de red y su resultado. */
+  diag_requested_at: string | null;
+  net_diag: NetDiag | null;
+  net_diag_at: string | null;
+  /** v15: zona (localidad, nodo u OLT) a la que pertenece. null = sin zona. */
+  zone_id: string | null;
+}
+
+/** v15: fila de mdm_zone_status. "online" = sincronizó en los últimos 5 minutos. */
+export interface ZoneStatus {
+  zone_id: string;
+  name: string;
+  total: number;
+  online: number;
+  /** Caída masiva en curso: cuándo empezó y el pico de equipos sin conexión. null = sin caída. */
+  outage_started_at: string | null;
+  outage_offline: number | null;
+}
+
+export const ZONE_OUTAGE_COLUMNS = 'id, zone_id, started_at, ended_at, offline, total, peak_offline' as const;
+
+/** v15: fila de mdm_zone_outages (historial de caídas masivas). ended_at null = sigue en curso. */
+export interface ZoneOutage {
+  id: number;
+  zone_id: string;
+  started_at: string;
+  ended_at: string | null;
+  offline: number;
+  total: number;
+  peak_offline: number;
+}
+
+// RPC de v15 (zonas) en un solo lugar.
+export const rpcUpsertZone = (company: string, id: string | null, name: string) =>
+  run<string>(db().rpc('mdm_upsert_zone', { p_company: company, p_id: id, p_name: name }));
+export const rpcDeleteZone = (id: string) => run(db().rpc('mdm_delete_zone', { p_id: id }));
+/** Mismo tope que mdm_set_devices_zone: más equipos que esto van en varias llamadas. */
+export const ZONE_BULK_MAX = 5000;
+/** Asigna (o quita, con null) la zona de muchos equipos. Devuelve cuántos cambiaron. */
+export async function rpcSetDevicesZone(company: string, devices: string[], zone: string | null): Promise<number> {
+  let changed = 0;
+  for (let i = 0; i < devices.length; i += ZONE_BULK_MAX) {
+    changed += (await run<number>(db().rpc('mdm_set_devices_zone', { p_company: company, p_devices: devices.slice(i, i + ZONE_BULK_MAX), p_zone: zone }))) ?? 0;
+  }
+  return changed;
+}
+
+// RPC de equipos (v8/v9) en un solo lugar: las usan el listado, el buscador global, el Resumen y las acciones en lote.
+export const rpcSetLock = (device: string, locked: boolean, reason?: string | null) =>
+  run(db().rpc('mdm_set_device_lock', locked ? { p_device: device, p_locked: true, p_reason: reason ?? null } : { p_device: device, p_locked: false }));
+export const rpcSetRestricted = (device: string, restricted: boolean, reason: string | null = null) =>
+  run(db().rpc('mdm_set_device_restricted', { p_device: device, p_restricted: restricted, p_reason: reason }));
+export const rpcSetPaidUntil = (device: string, paidUntil: string | null, note: string | null = null) =>
+  run(db().rpc('mdm_set_paid_until', { p_device: device, p_paid_until: paidUntil, p_note: note }));
+export const rpcUnlockCode = (device: string) => run<UnlockCode>(db().rpc('mdm_unlock_code', { p_device: device }));
+
+/** Mismo formato que valida la base (mdm_devices.external_ref). */
+export const EXTERNAL_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,63}$/;
+/** Mismos formatos que valida mdm_update_company (v9). */
+export const PAYMENT_PHONE_RE = /^[0-9 +()-]{5,32}$/;
+export const PAYMENT_URL_RE = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?([/?#][A-Za-z0-9._~%/+=&?#:@,;!*-]*)?$/;
+export const PAYMENT_URL_MAX = 300;
+
+/** Estado de servicio (v9), mismo cálculo que el servidor (service_state de la API del ISP). */
+export type ServiceState = 'active' | 'warning' | 'restricted' | 'locked';
+
+export const STATE_LOG_COLUMNS = 'id, device_id, state, source, details, at' as const;
+
+/** Fila de mdm_device_state_log: cada cambio de estado (panel, API del ISP o lo que informó el equipo). */
+export interface StateLogEntry {
+  id: number;
+  device_id: string;
+  state: ServiceState;
+  source: 'panel' | 'api' | 'device';
+  details: Record<string, unknown>;
+  at: string;
+}
+
+/** El equipo considera "online" si sincronizó en los últimos 5 minutos (sync cada 60 s). */
+export function isOnline(d: Device): boolean {
+  return !!d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() < 5 * 60_000;
+}
+
+export type Enforcement = 'confirmado' | 'pendiente' | 'sin datos';
+
+/** ¿El equipo aplicó lo que pidió el panel? Compara el estado deseado con el que informó. */
+export function enforcement(d: Device, c: Company): Enforcement {
+  if (!d.reported_mode) return 'sin datos';
+  const status = deviceStatus(d, c);
+  const expected = status === 'bloqueado' || status === 'pago vencido' ? 'locked' : status === 'restringido' ? 'restricted' : 'active';
+  const actual = d.reported_mode === 'locked' ? 'locked' : d.reported_mode === 'restricted' ? 'restricted' : 'active';
+  return expected === actual ? 'confirmado' : 'pendiente';
+}
+
+export interface CatalogApp {
+  id: string;
+  name: string;
+  kind: 'web' | 'internal';
+  launch_url: string | null;
+  icon_url: string | null;
+  domains: string[];
+  active: boolean;
+  /** Se le pasa al servicio la atestación del equipo (JWT) al abrirlo. */
+  pass_attestation?: boolean;
+}
+
+/** v12: app Android que el ISP carga para sus equipos (Play Store o APK propio). */
+export interface AndroidApp {
+  company_id: string;
+  package: string;
+  name: string;
+  source: 'play' | 'apk';
+  apk_path: string | null;
+  version_code: number | null;
+  version_name: string | null;
+  sha256: string | null;
+  size: number | null;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export const APK_BUCKET = 'mdm-apps';
+/** Mismo límite que el bucket mdm-apps. */
+export const APK_MAX_BYTES = 200 * 1024 * 1024;
+/** Mismo formato que valida la base (mdm_company_android_apps.package). */
+export const PACKAGE_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
+
+/** v12: comunicado a los TV de la empresa (mdm_list_notices). */
+export type NoticeCategory = 'corte' | 'clima' | 'salud' | 'municipal' | 'general';
+export type NoticeSeverity = 'info' | 'importante' | 'emergencia';
+export interface Notice {
+  id: string;
+  title: string;
+  body: string;
+  category: NoticeCategory;
+  severity: NoticeSeverity;
+  starts_at: string;
+  expires_at: string;
+  created_at: string;
+  cancelled_at: string | null;
+  seen: number;
+  /** v15: equipos a los que les llega (solo los de las zonas elegidas, si las hay). */
+  devices: number;
+  /** v15: zonas a las que va dirigido. null = todos los equipos. */
+  zone_ids: string[] | null;
+}
+
+export interface UnlockCode {
+  code: string;
+  valid_on: string;
+  hours: number;
+}
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Respuesta de mdm_create_api_key: la clave completa solo viaja esta vez. */
+export interface NewApiKey {
+  id: string;
+  key: string;
+  prefix: string;
+}
+
+/** Plataforma de un release (v11): imagen de firmware Linux o APK de NEX TV para Android. */
+export type FirmwarePlatform = 'linux' | 'android';
+
+export interface FirmwareRelease {
+  id: string;
+  version: string;
+  build: number;
+  url: string;
+  sha256: string;
+  size: number;
+  sig: string;
+  notes: string | null;
+  created_at: string;
+  platform: FirmwarePlatform;
+}
+
+/** company_id null = target global. Hay un target por empresa y plataforma. */
+export interface FirmwareTarget {
+  company_id: string | null;
+  company_name: string | null;
+  release_id: string;
+  version: string;
+  build: number;
+  updated_at: string;
+  platform: FirmwarePlatform;
+}
+
+export interface Member {
+  user_id: string;
+  role: 'owner' | 'admin';
+}
+
+export interface AuditEntry {
+  id: number;
+  actor: string | null;
+  action: string;
+  target: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DomainReportRow {
+  domain: string;
+  devices: number;
+  companies: number;
+  hits: number;
+  last_seen_at: string;
+  status: 'pirateria' | 'legitimo' | 'ignorar' | null;
+}
+
+export const LOGO_BUCKET = 'mdm-branding';
+export const LOGO_MAX_BYTES = 1024 * 1024;
+export const LOGO_TYPES: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+};
+
+export function db(): SupabaseClient {
+  const client = getAdminSupabase();
+  if (!client) throw new Error('Supabase no configurado (VITE_SUPABASE_URL / KEY)');
+  return client;
+}
+
+/** Ejecuta una consulta y convierte el error de Supabase en Error con mensaje legible. */
+/** Error de Supabase con su código (ej. P0401 = hace falta confirmar el segundo factor). */
+export class ApiError extends Error {
+  readonly code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/** Ejecuta una consulta y convierte el error de Supabase en ApiError con mensaje legible. */
+export async function run<T>(query: PromiseLike<{ data: T | null; error: unknown }>): Promise<T> {
+  const { data, error } = await query;
+  if (error) throw new ApiError(getSupabaseErrorMessage(error), (error as { code?: string }).code);
+  return data as T;
+}
+
+export function logoUrl(path: string | null): string | null {
+  if (!path) return null;
+  return db().storage.from(LOGO_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/** Valida tipo real del archivo por su firma, no solo por la extensión declarada. */
+export async function sniffImageType(file: File): Promise<string | null> {
+  const b = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const hex = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  if (hex.startsWith('89504e470d0a1a0a')) return 'image/png';
+  if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+  if (hex.startsWith('52494646') && hex.slice(16, 24) === '57454250') return 'image/webp';
+  return null;
+}
+
+export type DeviceStatus = 'activo' | 'bloqueado' | 'pago vencido' | 'restringido' | 'por vencer' | 'sin conexión';
+
+/** Día (inclusive) en que el equipo pasa a restringido por pago, o null si la empresa no usa esa etapa. */
+export function restrictDay(d: Device, c: Company): string | null {
+  if (!d.paid_until || c.payment_restrict_days == null || c.payment_restrict_days >= c.payment_grace_days) return null;
+  return addDays(d.paid_until, 1 + c.payment_restrict_days);
+}
+
+/** Mismo orden que el servidor: bloqueo manual > pago vencido > restringido manual > restringido por pago > aviso. */
+export function serviceState(d: Device, c: Company): ServiceState {
+  if (d.locked) return 'locked';
+  if (!d.paid_until) return d.restricted ? 'restricted' : 'active';
+  const today = new Date().toISOString().slice(0, 10);
+  if (today >= addDays(d.paid_until, 1 + c.payment_grace_days)) return 'locked';
+  const rDay = restrictDay(d, c);
+  if (d.restricted || (rDay && today >= rDay)) return 'restricted';
+  if (today >= addDays(d.paid_until, 1 - c.payment_warning_days)) return 'warning';
+  return 'active';
+}
+
+export function deviceStatus(d: Device, c: Company): DeviceStatus {
+  const state = serviceState(d, c);
+  if (d.locked) return 'bloqueado';
+  if (state === 'locked') return 'pago vencido';
+  if (state === 'restricted') return 'restringido';
+  if (state === 'warning') return 'por vencer';
+  if (d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() > c.offline_lock_days * 86_400_000) {
+    return 'sin conexión';
+  }
+  return 'activo';
+}
+
+export function addDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Invita (o suma, si ya tiene cuenta) a un miembro por email con la Edge Function mdm-invite (schema-mdm-v14.sql).
+ * Los errores llegan con el código de Postgres: P0401 hace que el panel pida el segundo factor y reintente.
+ */
+export async function inviteMember(company: string, email: string, role: 'admin' | 'owner'): Promise<{ invited: boolean }> {
+  const { data, error } = await db().functions.invoke<{ invited: boolean }>('mdm-invite', { body: { company, email, role } });
+  if (error) {
+    const ctx = (error as { context?: Response }).context;
+    const body = ctx && typeof ctx.json === 'function' ? await ctx.json().catch(() => null) : null;
+    throw new ApiError(body?.message ?? 'No se pudo invitar. Probá de nuevo en unos minutos.', body?.code);
+  }
+  return data ?? { invited: false };
+}

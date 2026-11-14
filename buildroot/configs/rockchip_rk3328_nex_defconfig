@@ -1,0 +1,24 @@
+# NEX-OS en TV box RK3318/RK3328 de 1 GB: rockchip_rk3328_defconfig sin lo que el
+# TV no usa (cámara, GStreamer, Bluetooth, benchmarks, stress tests, fuente china,
+# clientes demo de weston). Menos rootfs y menos demonios ocupando RAM.
+# Chromium decodifica video con MPP por V4L2 (libv4l-rkmpp), no con GStreamer.
+#include "base/base.config"
+#include "chips/rk3328_aarch64.config"
+#include "font/font.config"
+#include "fs/vfat.config"
+#include "gpu/gpu.config"
+#include "multimedia/audio.config"
+#include "multimedia/mpp.config"
+#include "wifibt/wireless.config"
+#include "network/chromium.config"
+# Carga de módulos y firmware del Wi-Fi de Rockchip (sin BlueZ).
+BR2_PACKAGE_RKWIFIBT=y
+BR2_PACKAGE_WAYLAND=y
+BR2_PACKAGE_WESTON=y
+BR2_PACKAGE_WESTON_DRM=y
+# Diagnóstico en el taller: teclas del control (evtest) y memoria por proceso (procrank).
+BR2_PACKAGE_EVTEST=y
+BR2_PACKAGE_PROCRANK_LINUX=y
+BR2_PACKAGE_IW=y
+BR2_TARGET_GENERIC_HOSTNAME="nex-tv"
+BR2_TARGET_GENERIC_ISSUE="NEX-OS"
