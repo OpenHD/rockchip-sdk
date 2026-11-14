@@ -225,8 +225,8 @@ function SetupActions({ state }: { state: MdmState }) {
   };
   return (
     <div ref={ref} onKeyDown={move} className="flex flex-col items-center space-y-3">
-      {!state.owner && <p className="text-white/50">Instalación incompleta: NEX todavía no protege este equipo.</p>}
-      {!state.owner && state.root && <RootSetup state={state} />}
+      {!state.owner && !state.guard && <p className="text-white/50">Instalación incompleta: NEX todavía no protege este equipo.</p>}
+      {!state.owner && !state.guard && state.root && <RootSetup state={state} />}
       <WifiEntry state={state} />
     </div>
   );
