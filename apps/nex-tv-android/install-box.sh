@@ -48,6 +48,14 @@ ADWARE=(
 	com.hpplay.happyplay.aw       # HappyCast: duplicar la pantalla del celular
 	com.agileapps.airplay         # Airplay: duplicar la pantalla del celular
 	org.mozilla.tv.firefox        # Firefox
+	# Otra variante del firmware TX6698 (nov. 2026), igual que Heal.kt:
+	com.android.gms.service       # "servicios de Google" falsos: instala apps y cambia ajustes seguros
+	com.android.vending.update    # "actualizador de Play" falso, con accesibilidad y administrador del equipo
+	com.android.network.cserver   # servidor de control remoto del fabricante
+	com.android.network.iotvads   # publicidad
+	com.huawei.qx                 # "Huawei" falso: corre al arrancar y dibuja sobre otras apps
+	a.b.c                         # sin nombre: corre al arrancar y dibuja sobre otras apps
+	com.flymobi.dramashort        # app de series cortas instalada de fábrica
 )
 
 dev() { adb -s "$TARGET" shell "$@" </dev/null | tr -d '\r'; }
@@ -127,7 +135,7 @@ for p in "${ADWARE[@]}"; do
 	installed "$p" || continue
 	if grep -qx "package:$p" <<<"$disabled"; then ok "$p desactivado"; else bad "$p sigue activo"; fi
 done
-if dev ps -A -o NAME | grep -qxE 'com\.example\.himac|com\.lz\.sysplugin|com\.android\.tvh|com\.android\.network|hp_special_ndk'; then
+if dev ps -A -o NAME | grep -qxE 'com\.example\.himac|com\.lz\.sysplugin|com\.android\.tvh|com\.android\.network|com\.android\.gms\.service|com\.huawei\.qx|a\.b\.c|hp_special_ndk'; then
 	bad "quedan procesos del adware corriendo"
 else
 	ok "sin procesos del adware"

@@ -40,7 +40,7 @@ object FactoryRisk {
     private val PORTS = mapOf(40000 to "cmd_root", 5555 to "adb")
     private val SU_PATHS = listOf("/system/xbin/su", "/system/bin/su", "/sbin/su")
     /** Apps de fábrica que ejecutan comandos o instalan a distancia. */
-    private val REMOTE_PACKAGES = listOf("com.example.himac", "com.lz.sysplugin")
+    private val REMOTE_PACKAGES = listOf("com.example.himac", "com.lz.sysplugin", "com.android.gms.service")
 
     @Volatile var uploadMbps: Double? = null
         private set

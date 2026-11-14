@@ -31,6 +31,10 @@ object Heal {
         "com.example.himac", "com.lz.sysplugin", "com.android.tvh", "com.android.network", "com.charon.rocketfly", "com.tv.napp",
         "com.simple.appstore.flymarket", "org.xbmc.kodi", "com.hpplay.happyplay.aw", "com.agileapps.airplay",
         "org.mozilla.tv.firefox", "com.droidlogic.mboxlauncher",
+        // Otra variante del firmware TX6698 (nov. 2026): Google Play y servicios falsos, publicidad y apps instaladas
+        // en silencio. com.android.gms.service tiene INSTALL_PACKAGES y WRITE_SECURE_SETTINGS.
+        "com.android.gms.service", "com.android.vending.update", "com.android.network.cserver",
+        "com.android.network.iotvads", "com.huawei.qx", "a.b.c", "com.flymobi.dramashort",
     )
 
     /** Hoy los equipos son de empresas argentinas: pasar a la configuración de la empresa si hay otros países. */
