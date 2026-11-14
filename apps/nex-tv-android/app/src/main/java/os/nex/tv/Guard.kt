@@ -1,6 +1,8 @@
 package os.nex.tv
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ComponentName
+import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -50,6 +52,15 @@ class Guard : AccessibilityService() {
 
         fun pause() {
             pausedUntil = SystemClock.elapsedRealtime() + PAUSE_MS
+        }
+
+        /** La protección está activa: Android tiene este servicio entre los de accesibilidad habilitados. */
+        fun isEnabled(ctx: Context): Boolean {
+            val cr = ctx.contentResolver
+            if (Settings.Secure.getInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 0) != 1) return false
+            val guard = ComponentName(ctx, Guard::class.java)
+            return Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+                .split(':').any { ComponentName.unflattenFromString(it) == guard }
         }
     }
 }

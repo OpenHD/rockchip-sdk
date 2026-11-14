@@ -230,6 +230,9 @@ class UpdateReceiver : BroadcastReceiver() {
 class PackageReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        // Al actualizar NEX, Android saca a Guard de los servicios de accesibilidad: sin esto el equipo queda
+        // sin protección hasta el próximo reinicio (visto en un TX6698, nov. 2026).
+        Heal.run(context)
         Agent.start(context)
         runCatching {
             context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

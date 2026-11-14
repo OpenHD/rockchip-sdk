@@ -425,6 +425,8 @@ object Agent {
             .put("mode", mode)
             // Sin Device Owner la UI ofrece al técnico activarlo con root (si el equipo lo tiene).
             .put("owner", owner)
+            // Sin Device Owner (firmwares sin device_admin) protege Guard: con Guard activo la instalación está completa.
+            .put("guard", !owner && Guard.isEnabled(app))
             .put("root", !owner && Provision.hasRoot())
             .put("updated_at", now())
             // Versión instalada, para mostrarla en Ajustes.
