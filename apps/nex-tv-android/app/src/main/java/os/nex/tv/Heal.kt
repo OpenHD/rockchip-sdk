@@ -35,6 +35,8 @@ object Heal {
         // en silencio. com.android.gms.service tiene INSTALL_PACKAGES y WRITE_SECURE_SETTINGS.
         "com.android.gms.service", "com.android.vending.update", "com.android.network.cserver",
         "com.android.network.iotvads", "com.huawei.qx", "a.b.c", "com.flymobi.dramashort",
+        // PlayMe: app de TV de fábrica que la empresa no quiere en sus equipos.
+        "net.playme.androidtv",
     )
 
     /** Hoy los equipos son de empresas argentinas: pasar a la configuración de la empresa si hay otros países. */

@@ -56,6 +56,7 @@ ADWARE=(
 	com.huawei.qx                 # "Huawei" falso: corre al arrancar y dibuja sobre otras apps
 	a.b.c                         # sin nombre: corre al arrancar y dibuja sobre otras apps
 	com.flymobi.dramashort        # app de series cortas instalada de fábrica
+	net.playme.androidtv          # PlayMe: app de TV de fábrica que la empresa no quiere
 )
 
 dev() { adb -s "$TARGET" shell "$@" </dev/null | tr -d '\r'; }
